@@ -88,12 +88,29 @@ body::after {
 .boot {
   position: fixed; inset: 0; z-index: 1000; background: #060402;
   display: flex; align-items: center; justify-content: center; flex-direction: column;
+  gap: 14px; padding: 24px;
   transition: opacity .5s; cursor: pointer;
 }
+.boot::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(circle at 50% 38%, rgba(251,191,36,0.1), transparent 60%);
+}
 .boot.hide { opacity: 0; pointer-events: none; }
-.boot .boot-text { font-family: var(--mono); color: var(--cyan); font-size: 14px; letter-spacing: .25em; text-shadow: 0 0 12px rgba(251,191,36,.75); }
-.boot .boot-bar { width: 220px; height: 2px; background: rgba(251,191,36,.18); margin-top: 18px; overflow: hidden; }
-.boot .boot-bar i { display: block; height: 100%; width: 40%; background: var(--cyan); box-shadow: 0 0 10px var(--cyan); animation: bootload 1.2s ease-in-out infinite; }
+.boot-logo { position: relative; animation: bootPulse 1.6s ease-in-out infinite; filter: drop-shadow(0 0 18px rgba(251,191,36,.5)); }
+@keyframes bootPulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.06); opacity: .82; } }
+.boot-text { font-family: var(--mono); color: var(--cyan); font-size: 14px; letter-spacing: .25em; text-shadow: 0 0 12px rgba(251,191,36,.75); }
+.boot-log {
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.9; text-align: left;
+  min-width: 320px; color: var(--dim); min-height: 132px;
+  display: flex; flex-direction: column; justify-content: flex-end;
+}
+.boot-line { white-space: pre; }
+.boot-line.active { color: #fde68a; text-shadow: 0 0 10px rgba(251,191,36,.45); }
+.boot-line .cursor { display: inline-block; width: 1.1em; color: var(--cyan); animation: blink 0.8s infinite; }
+.boot-line .boot-ok { color: var(--green); display: inline-block; width: 1.1em; }
+.boot-bar { width: 320px; height: 2px; background: rgba(251,191,36,.18); overflow: hidden; }
+.boot-bar i { display: block; height: 100%; width: 40%; background: var(--cyan); box-shadow: 0 0 10px var(--cyan); animation: bootload 1.2s ease-in-out infinite; }
+.boot-pct { font-family: var(--mono); font-size: 11px; letter-spacing: .2em; color: var(--faint); }
 @keyframes bootload { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
 
 /* ── Nav ── */

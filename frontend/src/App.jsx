@@ -10,6 +10,15 @@ import {
 
 const STAGES = ['TARGETING', 'PROBING', 'EXPLOITING', 'GRADING']
 
+const BOOT_LINES = [
+  '> CALIBRATING OPTIC SENSOR ............ OK',
+  '> LOADING SCAN ENGINE v2.4 ............ OK',
+  '> ARMING 8 VULNERABILITY CLASSES ...... OK',
+  '> SPOOLING PROOF-OF-EXPLOIT ENGINE .... OK',
+  '> ESTABLISHING ZERO-TRUST SHELL ....... OK',
+  '> AEGIS SYSTEM // ONLINE',
+]
+
 function stageFrom(logs, findings) {
   const txt = (logs || []).join(' ')
   if (txt.includes('finding(s):') || (findings && findings.length)) return 2
@@ -54,6 +63,7 @@ export default function App() {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('sentinel_api_key') || '')
   const [booted, setBooted] = useState(false)
   const [bootGone, setBootGone] = useState(false)
+  const [bootLine, setBootLine] = useState(0)
   const termRef = useRef(null)
 
   function finishBoot() {
@@ -63,6 +73,10 @@ export default function App() {
 
   useEffect(() => { loadHistory() }, [])
   useEffect(() => { const t = setTimeout(finishBoot, 2100); return () => clearTimeout(t) }, [])
+  useEffect(() => {
+    const iv = setInterval(() => setBootLine(l => Math.min(l + 1, BOOT_LINES.length - 1)), 300)
+    return () => clearInterval(iv)
+  }, [])
   useEffect(() => {
     if (termRef.current) termRef.current.scrollTop = termRef.current.scrollHeight
   }, [logs])
@@ -169,8 +183,18 @@ export default function App() {
 
       {!bootGone && (
         <div className={'boot' + (booted ? ' hide' : '')} onClick={finishBoot}>
+          <div className="boot-logo"><Logo size={76} /></div>
           <div className="boot-text">AEGIS SYSTEM // INITIALIZING</div>
+          <div className="boot-log">
+            {BOOT_LINES.slice(0, bootLine + 1).map((l, i) => (
+              <div key={i} className={'boot-line' + (i === bootLine ? ' active' : '')}>
+                {i === bootLine ? <span className="cursor">▌</span> : <span className="boot-ok">·</span>}
+                {l}
+              </div>
+            ))}
+          </div>
           <div className="boot-bar"><i /></div>
+          <div className="boot-pct">{String(Math.min(99, Math.round(((bootLine + 1) / BOOT_LINES.length) * 100))).padStart(2, '0')}%</div>
         </div>
       )}
 
