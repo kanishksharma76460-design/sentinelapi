@@ -3,6 +3,7 @@ import Globe from './components/Globe.jsx'
 import AttackGraph from './components/AttackGraph.jsx'
 import Eye from './components/Eye.jsx'
 import Logo from './components/Logo.jsx'
+import SynthGrid from './components/SynthGrid.jsx'
 import {
   ALL_CHECKS, DEMO_TARGET, OWASP, SEV,
   startScan, getScan, listScans, cancelScan, deleteScan, reportUrl
@@ -159,6 +160,8 @@ export default function App() {
 
   return (
     <div className="app">
+      <SynthGrid />
+
       {!booted && (
         <div className="boot" onClick={() => setBooted(true)}>
           <div className="boot-text">AEGIS SYSTEM // INITIALIZING</div>

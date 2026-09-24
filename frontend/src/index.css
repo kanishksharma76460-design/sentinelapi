@@ -48,6 +48,41 @@ body::after {
 
 .app { max-width: 1180px; margin: 0 auto; padding: 0 26px 120px; position: relative; z-index: 2; }
 
+/* ── Synthwave grid floor ── */
+.grid-sun {
+  position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%);
+  width: 420px; height: 420px; border-radius: 50%; z-index: 0; pointer-events: none;
+  background: radial-gradient(circle, rgba(34,211,238,0.6) 0%, rgba(139,92,246,0.3) 45%, transparent 72%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 55%);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent 55%);
+}
+.grid-horizon {
+  position: fixed; top: 38%; left: 0; right: 0; height: 2px; z-index: 0; pointer-events: none;
+  background: linear-gradient(90deg, transparent 0%, rgba(34,211,238,1) 50%, transparent 100%);
+  box-shadow: 0 0 44px 4px rgba(34,211,238,0.7);
+}
+.grid-floor {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+  perspective: 620px;
+}
+.grid-floor::before {
+  content: ''; position: absolute;
+  left: -60%; right: -60%; top: 38%; bottom: -30%;
+  background-image:
+    linear-gradient(transparent 0, rgba(34,211,238,0.34) 1px, transparent 2px),
+    linear-gradient(90deg, transparent 0, rgba(34,211,238,0.34) 1px, transparent 2px);
+  background-size: 52px 52px;
+  transform: rotateX(73deg);
+  transform-origin: center top;
+  animation: gridScroll 1.4s linear infinite;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 30%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 30%);
+}
+@keyframes gridScroll {
+  0% { background-position: 0 0; }
+  100% { background-position: 0 52px; }
+}
+
 /* ── Boot screen ── */
 .boot {
   position: fixed; inset: 0; z-index: 1000; background: #020304;
