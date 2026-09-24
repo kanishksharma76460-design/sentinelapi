@@ -5,6 +5,7 @@ engine/sentinel-engine
 scanner/report.html
 scanner/findings.json
 *.pdf
+!backend/static/*.pdf
 *.tex
 *.aux
 *.log

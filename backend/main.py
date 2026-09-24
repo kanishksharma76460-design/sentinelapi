@@ -873,7 +873,12 @@ def _render_preprint_pdf() -> bytes:
 
 @app.get("/preprint")
 def preprint():
-    """Download the research preprint as a PDF (generated on demand)."""
+    """Download the research preprint as a PDF (compiled from doc/ieee_paper.tex)."""
+    pdf = STATIC / "athera-preprint.pdf"
+    if pdf.exists():
+        return FileResponse(pdf, media_type="application/pdf",
+                            filename="athera-secure-preprint.pdf")
+    # Fallback (e.g. local dev without a compiled paper): generate on demand.
     return Response(
         content=_render_preprint_pdf(), media_type="application/pdf",
         headers={"Content-Disposition":
