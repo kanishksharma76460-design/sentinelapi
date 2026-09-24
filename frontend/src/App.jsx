@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import AttackGraph from './components/AttackGraph.jsx'
 import Eye from './components/Eye.jsx'
 import Logo from './components/Logo.jsx'
+import RobotFace from './components/RobotFace.jsx'
 import SynthGrid from './components/SynthGrid.jsx'
 import {
   ALL_CHECKS, DEMO_TARGET, OWASP, SEV,
@@ -65,6 +66,9 @@ export default function App() {
   const [booted, setBooted] = useState(false)
   const [bootGone, setBootGone] = useState(false)
   const [bootLine, setBootLine] = useState(0)
+  const [gateOpen, setGateOpen] = useState(false)
+  const [gateClosing, setGateClosing] = useState(false)
+  const [terminated, setTerminated] = useState(false)
   const [health, setHealth] = useState(null)
   const [webhookUrl, setWebhookUrl] = useState('')
   const [diff, setDiff] = useState(null)
@@ -82,6 +86,22 @@ export default function App() {
     setTimeout(() => setBootGone(true), 550)
   }
 
+  function proceed() {
+    setGateClosing(true)
+    setTimeout(() => setGateOpen(true), 850)
+  }
+
+  function terminate() {
+    setTerminated(true)
+    try { window.close() } catch { /* tab stays open — terminated screen shows */ }
+  }
+
+  function restoreSession() {
+    setTerminated(false)
+    setGateOpen(false)
+    setGateClosing(false)
+  }
+
   useEffect(() => { loadHistory() }, [])
   useEffect(() => {
     getHealth().then(setHealth).catch(() => setHealth({ engine: false }))
@@ -91,11 +111,16 @@ export default function App() {
       if (s.login_required && !hasSession()) setNeedsLogin(true)
     }).catch(() => {})
   }, [])
-  useEffect(() => { const t = setTimeout(finishBoot, 2100); return () => clearTimeout(t) }, [])
   useEffect(() => {
+    if (!gateOpen) return
+    const t = setTimeout(finishBoot, 2100)
+    return () => clearTimeout(t)
+  }, [gateOpen])
+  useEffect(() => {
+    if (!gateOpen) return
     const iv = setInterval(() => setBootLine(l => Math.min(l + 1, BOOT_LINES.length - 1)), 300)
     return () => clearInterval(iv)
-  }, [])
+  }, [gateOpen])
   useEffect(() => {
     if (termRef.current) termRef.current.scrollTop = termRef.current.scrollHeight
   }, [logs])
@@ -239,7 +264,35 @@ export default function App() {
     <div className="app">
       <SynthGrid />
 
-      {!bootGone && (
+      {/* ── Access gate (robot face) ── */}
+      {terminated ? (
+        <div className="gate-overlay">
+          <div className="gate-term">
+            <div className="gate-term-glyph">⏻</div>
+            <div className="gate-term-title">CONNECTION TERMINATED</div>
+            <p className="gate-term-sub">Session terminated by operator. All systems powered down.</p>
+            <button className="gate-btn restore" onClick={restoreSession}>↻ RESTORE SESSION</button>
+          </div>
+        </div>
+      ) : !gateOpen && (
+        <div className={'gate-overlay' + (gateClosing ? ' closing' : '')}>
+          <div className="gate-stage">
+            <div className="gate-top">
+              <span className="gate-label">AEGIS // ACCESS GATE</span>
+              <span className="gate-status"><span className="dot" /> {gateClosing ? 'AUTHENTICATING' : 'STANDBY'}</span>
+            </div>
+            <RobotFace powering={gateClosing} />
+            <div className="gate-name">AEGIS-9 <span className="dim">// Autonomous Security Sentinel</span></div>
+            <div className="gate-actions">
+              <button className="gate-btn terminate" onClick={terminate}>✕ TERMINATE</button>
+              <button className="gate-btn proceed" onClick={proceed} disabled={gateClosing}>▶ PROCEED</button>
+            </div>
+            <div className="gate-hint">Proceeding initiates the zero-trust boot sequence.</div>
+          </div>
+        </div>
+      )}
+
+      {gateOpen && !bootGone && (
         <div className={'boot' + (booted ? ' hide' : '')} onClick={finishBoot}>
           <div className="boot-logo"><Logo size={76} /></div>
           <div className="boot-text">AEGIS SYSTEM // INITIALIZING</div>
