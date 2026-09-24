@@ -34,3 +34,7 @@ frontend/dist/
 
 # OS / editor
 .DS_Store
+
+# Logo render scratch (paper is local-only)
+doc/athera-logo.png
+doc/_logo_render.html
