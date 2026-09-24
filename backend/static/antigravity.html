@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Athera Secure — Anti-Gravity AI Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --void: #06080D;
+      --carbon: #11141D;
+      --cyan: #00F0FF;
+      --amber: #FFB800;
+      --emerald: #00FFA3;
+      --silver: #E2E8F0;
+      --core-color: var(--cyan);
+    }
+    
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      background-color: var(--void);
+      color: var(--silver);
+      font-family: 'Chakra Petch', sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      perspective: 1000px;
+    }
+
+    /* Ambient Background Grid */
+    .bg-grid {
+      position: absolute;
+      inset: 0;
+      background-image: 
+        linear-gradient(rgba(0, 240, 255, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
+      background-size: 50px 50px;
+      transform: perspective(500px) rotateX(60deg) translateY(100px) translateZ(-200px);
+      animation: gridDrift 20s linear infinite;
+      z-index: 0;
+      pointer-events: none;
+    }
+    @keyframes gridDrift {
+      from { background-position: 0 0; }
+      to { background-position: 0 50px; }
+    }
+
+    /* Header / Branding */
+    header {
+      position: absolute;
+      top: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      z-index: 10;
+    }
+    header h1 {
+      font-size: 42px;
+      font-weight: 700;
+      color: var(--silver);
+      text-transform: uppercase;
+      letter-spacing: 4px;
+      text-shadow: 0 0 20px rgba(226, 232, 240, 0.3);
+    }
+    header h2 {
+      font-size: 14px;
+      color: var(--cyan);
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: 2px;
+      margin-top: 8px;
+    }
+
+    /* Telemetry HUD */
+    .telemetry {
+      position: absolute;
+      top: 40px;
+      right: 40px;
+      text-align: right;
+      font-family: 'JetBrains Mono', monospace;
+      z-index: 10;
+    }
+    .t-row { margin-bottom: 10px; font-size: 13px; }
+    .t-label { color: rgba(226, 232, 240, 0.5); text-transform: uppercase; }
+    .t-val { color: var(--emerald); font-weight: 700; text-shadow: 0 0 10px rgba(0, 255, 163, 0.5); }
+
+    /* The Levitation Nucleus */
+    .nucleus-container {
+      position: relative;
+      width: 400px;
+      height: 400px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 5;
+      transform-style: preserve-3d;
+      animation: levitate 6s ease-in-out infinite;
+    }
+    @keyframes levitate {
+      0%, 100% { transform: translateY(0) rotateX(10deg) rotateY(-5deg); }
+      50% { transform: translateY(-20px) rotateX(15deg) rotateY(5deg); }
+    }
+
+    .core-orb {
+      width: 120px;
+      height: 120px;
+      background: radial-gradient(circle at 30% 30%, #fff, var(--core-color) 40%, #000 90%);
+      border-radius: 50%;
+      box-shadow: 0 0 50px var(--core-color), inset 0 0 20px #fff;
+      transition: all 0.5s ease;
+      z-index: 2;
+    }
+
+    .ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 2px solid rgba(0, 240, 255, 0.2);
+      border-top: 2px solid var(--core-color);
+      transform-style: preserve-3d;
+    }
+    .ring-1 {
+      width: 200px; height: 200px;
+      animation: spin1 8s linear infinite;
+    }
+    .ring-2 {
+      width: 280px; height: 280px;
+      animation: spin2 12s linear infinite reverse;
+      border-top-color: var(--emerald);
+    }
+    .ring-3 {
+      width: 380px; height: 380px;
+      animation: spin3 20s linear infinite;
+      border-top-color: var(--amber);
+      border-bottom: 2px solid var(--cyan);
+    }
+
+    @keyframes spin1 { 100% { transform: rotateX(70deg) rotateY(20deg) rotateZ(360deg); } }
+    @keyframes spin2 { 100% { transform: rotateX(40deg) rotateY(60deg) rotateZ(360deg); } }
+    @keyframes spin3 { 100% { transform: rotateX(80deg) rotateY(-20deg) rotateZ(360deg); } }
+
+    /* Floating Status Pills (Magnetic Repulsion targets) */
+    .pill {
+      position: absolute;
+      padding: 8px 16px;
+      background: rgba(17, 20, 29, 0.8);
+      border: 1px solid var(--cyan);
+      border-radius: 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--cyan);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      transition: transform 0.1s ease-out; /* For magnetic repulsion */
+      z-index: 10;
+    }
+    
+    #pill-1 { top: 20%; left: 15%; }
+    #pill-2 { bottom: 25%; right: 15%; }
+    #pill-3 { bottom: 20%; left: 20%; border-color: var(--emerald); color: var(--emerald); }
+
+    /* Vector Stream */
+    .vector-stream {
+      position: absolute;
+      bottom: -50px;
+      width: 100%;
+      height: 60vh;
+      pointer-events: none;
+      z-index: 4;
+      overflow: hidden;
+    }
+    .particle {
+      position: absolute;
+      bottom: 0;
+      width: 4px;
+      height: 12px;
+      background: var(--cyan);
+      border-radius: 2px;
+      box-shadow: 0 0 10px var(--cyan);
+      animation: floatUp linear forwards;
+    }
+    .particle.vuln {
+      background: var(--amber);
+      box-shadow: 0 0 15px var(--amber);
+      width: 6px; height: 6px; border-radius: 50%;
+      animation: floatUpTrap linear forwards;
+    }
+    @keyframes floatUp {
+      to { transform: translateY(-80vh) scale(0); opacity: 0; }
+    }
+    @keyframes floatUpTrap {
+      50% { transform: translateY(-40vh) scale(2); opacity: 1; }
+      100% { transform: translateY(-45vh) scale(1); opacity: 0.8; } /* Trapped in field */
+    }
+
+    /* Action Controls */
+    .controls {
+      position: absolute;
+      bottom: 40px;
+      display: flex;
+      gap: 20px;
+      z-index: 20;
+    }
+    button {
+      background: rgba(0, 240, 255, 0.1);
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      padding: 14px 28px;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.3s ease;
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.1);
+      backdrop-filter: blur(5px);
+    }
+    button:hover {
+      background: var(--cyan);
+      color: var(--void);
+      box-shadow: 0 0 30px rgba(0, 240, 255, 0.6);
+    }
+    button.alert {
+      border-color: var(--amber); color: var(--amber); background: rgba(255, 184, 0, 0.1);
+    }
+    button.alert:hover { background: var(--amber); color: var(--void); box-shadow: 0 0 30px rgba(255, 184, 0, 0.6); }
+
+    /* Modal */
+    .modal {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%) scale(0.9);
+      width: 600px;
+      background: rgba(6, 8, 13, 0.95);
+      border: 1px solid var(--amber);
+      border-radius: 12px;
+      padding: 30px;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      box-shadow: 0 20px 50px rgba(0,0,0,0.8), 0 0 30px rgba(255, 184, 0, 0.1);
+      backdrop-filter: blur(20px);
+    }
+    .modal.active { opacity: 1; transform: translate(-50%, -50%) scale(1); pointer-events: auto; }
+    .modal h3 { font-size: 24px; color: var(--amber); margin-bottom: 15px; }
+    .diff-box {
+      background: var(--carbon);
+      padding: 15px;
+      border-radius: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      margin-bottom: 20px;
+    }
+    .diff-del { color: #ff4444; }
+    .diff-add { color: var(--emerald); }
+    .modal-actions { display: flex; gap: 15px; justify-content: flex-end; }
+  </style>
+</head>
+<body>
+
+  <div class="bg-grid"></div>
+
+  <header>
+    <h1>Anti-Gravity AI</h1>
+    <h2>V1.0 ZERO-G CORE / ATHERA SECURE</h2>
+  </header>
+
+  <div class="telemetry">
+    <div class="t-row"><span class="t-label">Gravity Reduced:</span> <span class="t-val" id="grav-val">99.8%</span></div>
+    <div class="t-row"><span class="t-label">Latency Overhead:</span> <span class="t-val" style="color:var(--cyan)">0ms</span></div>
+    <div class="t-row"><span class="t-label">Core Status:</span> <span class="t-val" id="status-val" style="color:var(--cyan)">STABLE</span></div>
+  </div>
+
+  <div class="pill" id="pill-1">[AUTONOMOUS_PROBING]</div>
+  <div class="pill" id="pill-2">[ZERO_G_VECTOR_SCAN]</div>
+  <div class="pill" id="pill-3">[DRIFT_ANALYSIS_ACTIVE]</div>
+
+  <div class="nucleus-container">
+    <div class="core-orb" id="orb"></div>
+    <div class="ring ring-1"></div>
+    <div class="ring ring-2"></div>
+    <div class="ring ring-3"></div>
+  </div>
+
+  <div class="vector-stream" id="stream"></div>
+
+  <div class="controls">
+    <button id="btn-scan">Engage Zero-G Scan</button>
+    <button id="btn-inject" class="alert">Simulate Vector Drift (BOLA)</button>
+  </div>
+
+  <!-- Auto-Patch Modal -->
+  <div class="modal" id="patch-modal">
+    <h3>⚠ Vector Trapped: BOLA Detected</h3>
+    <p style="margin-bottom: 15px; font-size: 14px;">Anti-Gravity Engine has isolated an unauthorized IDOR access trajectory on <code>/api/v1/checkout</code>. Autonomous AST patch generated.</p>
+    <div class="diff-box">
+      <div class="diff-del">- const order = await db.getOrder(req.params.id);</div>
+      <div class="diff-add">+ const order = await db.getOrder({ id: req.params.id, userId: req.user.id });</div>
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeModal()" style="background:transparent; border-color:var(--muted); color:var(--muted);">Dismiss</button>
+      <button class="alert" onclick="applyPatch()">Deploy Zero-Friction Hotfix</button>
+    </div>
+  </div>
+
+  <script>
+    // --- Magnetic Repulsion for Pills ---
+    const pills = document.querySelectorAll('.pill');
+    document.addEventListener('mousemove', (e) => {
+      const mouseX = e.clientX;
+      const mouseY = e.clientY;
+
+      pills.forEach(pill => {
+        const rect = pill.getBoundingClientRect();
+        const pillX = rect.left + rect.width / 2;
+        const pillY = rect.top + rect.height / 2;
+        
+        const dx = pillX - mouseX;
+        const dy = pillY - mouseY;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        
+        // Repel distance
+        if (dist < 150) {
+          const force = (150 - dist) / 150;
+          const pushX = (dx / dist) * force * 50;
+          const pushY = (dy / dist) * force * 50;
+          pill.style.transform = `translate(${pushX}px, ${pushY}px)`;
+        } else {
+          pill.style.transform = `translate(0px, 0px)`;
+        }
+      });
+    });
+
+    // --- Audio Synthesis (Low Hum 60Hz) ---
+    let audioCtx, osc, gainNode;
+    let audioInitialized = false;
+
+    function initAudio() {
+      if(audioInitialized) return;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      osc = audioCtx.createOscillator();
+      gainNode = audioCtx.createGain();
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(60, audioCtx.currentTime); // Sub-bass hum
+      
+      gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 2); // Fade in
+      
+      osc.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      osc.start();
+      audioInitialized = true;
+    }
+
+    // --- Vector Stream & State Logic ---
+    const streamContainer = document.getElementById('stream');
+    const orb = document.getElementById('orb');
+    const statusVal = document.getElementById('status-val');
+    const gravVal = document.getElementById('grav-val');
+    let scanInterval;
+
+    function spawnParticle(isVuln = false) {
+      const p = document.createElement('div');
+      p.className = 'particle' + (isVuln ? ' vuln' : '');
+      p.style.left = Math.random() * 100 + '%';
+      p.style.animationDuration = (isVuln ? 3 : (1.5 + Math.random())) + 's';
+      streamContainer.appendChild(p);
+      setTimeout(() => p.remove(), 4000);
+    }
+
+    document.getElementById('btn-scan').addEventListener('click', () => {
+      initAudio();
+      
+      // Shift Audio Pitch Upward smoothly
+      osc.frequency.linearRampToValueAtTime(85, audioCtx.currentTime + 1);
+      
+      // Change UI state
+      document.documentElement.style.setProperty('--core-color', '#FFB800'); // Amber
+      statusVal.textContent = 'PROBING...';
+      statusVal.style.color = 'var(--amber)';
+      gravVal.textContent = '97.2%';
+      
+      clearInterval(scanInterval);
+      scanInterval = setInterval(() => { spawnParticle(false); spawnParticle(false); }, 150);
+
+      setTimeout(() => {
+        // Return to Stable
+        clearInterval(scanInterval);
+        document.documentElement.style.setProperty('--core-color', '#00FFA3'); // Emerald
+        statusVal.textContent = 'SECURE';
+        statusVal.style.color = 'var(--emerald)';
+        gravVal.textContent = '99.9%';
+        if(osc) osc.frequency.linearRampToValueAtTime(60, audioCtx.currentTime + 1.5);
+      }, 5000);
+    });
+
+    document.getElementById('btn-inject').addEventListener('click', () => {
+      initAudio();
+      if(osc) osc.frequency.linearRampToValueAtTime(110, audioCtx.currentTime + 0.5); // High alert pitch
+      
+      document.documentElement.style.setProperty('--core-color', '#ff003c'); // Critical Red
+      statusVal.textContent = 'ANOMALY DETECTED';
+      statusVal.style.color = '#ff003c';
+      
+      // Spawn vulnerable particle
+      spawnParticle(true);
+      
+      // Open Modal shortly after particle traps
+      setTimeout(() => {
+        document.getElementById('patch-modal').classList.add('active');
+      }, 1500);
+    });
+
+    function closeModal() {
+      document.getElementById('patch-modal').classList.remove('active');
+      document.documentElement.style.setProperty('--core-color', '#00F0FF'); // Back to cyan
+      statusVal.textContent = 'STABLE';
+      statusVal.style.color = 'var(--cyan)';
+      if(osc) osc.frequency.linearRampToValueAtTime(60, audioCtx.currentTime + 1);
+    }
+
+    function applyPatch() {
+      closeModal();
+      document.documentElement.style.setProperty('--core-color', '#00FFA3');
+      statusVal.textContent = 'HOTFIX DEPLOYED';
+      statusVal.style.color = 'var(--emerald)';
+    }
+
+  </script>
+</body>
+</html>
