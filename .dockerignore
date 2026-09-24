@@ -1,0 +1,12 @@
+.venv/
+.git/
+scans.db
+engine/sentinel-engine
+scanner/report.html
+scanner/findings.json
+*.pdf
+*.tex
+*.aux
+*.log
+*.out
+__pycache__/

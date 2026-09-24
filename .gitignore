@@ -1,0 +1,25 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Go build artifacts
+engine/sentinel-engine
+engine/sentinel-engine.exe
+
+# Runtime / generated
+scans.db
+scanner/findings.json
+scanner/report.html
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.nav
+*.snm
+*.vrb
+
+# OS / editor
+.DS_Store
