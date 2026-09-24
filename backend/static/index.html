@@ -252,6 +252,34 @@
   
   .dynamic-results { margin-top: 40px; }
 
+  /* ── Hero typography ── */
+  .hero-head { text-align: left; }
+  .hero-title {
+    font-family: 'Outfit', sans-serif; font-size: clamp(26px, 3.2vw, 42px);
+    font-weight: 800; line-height: 1.08; letter-spacing: -0.02em;
+    color: #0f172a; margin: 18px 0 12px;
+  }
+  .hero-title .grad {
+    background: linear-gradient(100deg, #0284c7, #7c3aed);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero-sub { font-size: 13px; color: #475569; line-height: 1.6; max-width: 520px; margin: 0; }
+
+  /* ── Detection engine cards ── */
+  .detect-section { margin-top: 32px; }
+  .detect-section .sum-title { color: #e2e8f0; }
+  .detect-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; }
+  .detect-card {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 16px; padding: 18px;
+    backdrop-filter: blur(4px) brightness(1.25); -webkit-backdrop-filter: blur(4px) brightness(1.25);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.12); transition: transform .2s, border-color .2s;
+  }
+  .detect-card:hover { transform: translateY(-3px); border-color: rgba(2,132,199,0.5); }
+  .detect-tag { display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 0.1em; color: #0284c7; margin-bottom: 8px; text-transform: uppercase; }
+  .detect-card b { display: block; font-size: 13px; font-weight: 800; color: #0f172a; margin-bottom: 6px; }
+  .detect-card p { margin: 0; font-size: 12px; color: #475569; line-height: 1.5; }
+
   /* ── Responsive / mobile ── */
   @media (max-width: 900px) {
     .dashboard-layout { flex-direction: column; height: auto; overflow: visible; }
@@ -329,10 +357,12 @@
     <div class="dashboard-grid">
       <!-- Top Left: Scan Form -->
       <section class="panel">
-        <div class="sum-title">WE KNOW WHAT IT TAKES TO SECURE THE GLOBAL NETWORK 
-          <div class="trust-pill" style="margin:0;padding:6px 12px;font-size:9px;"><span class="star">✦</span> Global Trust Verified</div>
+        <div class="hero-head">
+          <span class="trust-pill"><span class="star">✦</span> Global Trust Verified</span>
+          <h2 class="hero-title">Ship faster.<br/>We'll handle the <span class="grad">security</span>.</h2>
+          <p class="hero-sub">Scan any API for broken access control, leaked data, weak authentication and privilege escalation — with proof you can run yourself.</p>
         </div>
-        <label class="field-label" style="margin-top:20px;" for="target">Target URL / Endpoint</label>
+        <label class="field-label" style="margin-top:24px;" for="target">Target URL / Endpoint</label>
         <input type="text" id="target" placeholder="https://api.yourdomain.com" spellcheck="false"/>
 
         <label class="consent-row">
@@ -391,6 +421,17 @@
         </table>
       </section>
     </div>
+
+    <section class="detect-section">
+      <div class="sum-title">⛨ DETECTION ENGINE <span>•••</span></div>
+      <div class="detect-grid">
+        <div class="detect-card"><span class="detect-tag">API1</span><b>BOLA / IDOR</b><p>Cross-account access to other users' records.</p></div>
+        <div class="detect-card"><span class="detect-tag">API3</span><b>Excessive Data Exposure</b><p>Secrets leaked beyond the declared schema.</p></div>
+        <div class="detect-card"><span class="detect-tag">API2</span><b>Broken Authentication</b><p>Declared auth that isn't enforced.</p></div>
+        <div class="detect-card"><span class="detect-tag">API5</span><b>Broken Function-Level Authz</b><p>Regular users reaching admin endpoints.</p></div>
+        <div class="detect-card"><span class="detect-tag">API6</span><b>Mass Assignment</b><p>Privileged fields accepted on writes.</p></div>
+      </div>
+    </section>
 
     <section class="cert-wrap" id="certWrap">
       <button class="cert-btn" onclick="downloadCert()">⭳ Download Cryptographic Report Badge</button>
