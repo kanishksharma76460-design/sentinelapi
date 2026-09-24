@@ -116,9 +116,19 @@ func dig(m map[string]interface{}, keys ...string) (interface{}, bool) {
 	return cur, true
 }
 
-// declaredKeys returns the property names declared in the 200 response schema,
-// or ok=false if no schema is declared.
-func declaredKeys(op map[string]interface{}) (map[string]bool, bool) {
+// opHasSecurity reports whether the operation DECLARES a security requirement
+// (a non-empty OpenAPI "security" array).
+func opHasSecurity(op map[string]interface{}) bool {
+	if op == nil {
+		return false
+	}
+	sec, ok := op["security"].([]interface{})
+	return ok && len(sec) > 0
+}
+
+// schemaPaths returns the set of dotted paths declared in the 200 response
+// schema, or ok=false if no schema is declared.
+func schemaPaths(op map[string]interface{}) (map[string]bool, bool) {
 	v, ok := dig(op, "responses", "200", "content", "application/json", "schema", "properties")
 	if !ok {
 		return nil, false
@@ -127,9 +137,74 @@ func declaredKeys(op map[string]interface{}) (map[string]bool, bool) {
 	if !ok {
 		return nil, false
 	}
-	keys := make(map[string]bool, len(props))
-	for k := range props {
-		keys[k] = true
+	var out []string
+	collectSchemaPaths(props, "", &out)
+	set := make(map[string]bool, len(out))
+	for _, p := range out {
+		set[p] = true
 	}
-	return keys, true
+	return set, true
+}
+
+// collectSchemaPaths walks a declared "properties" map and emits dotted paths.
+func collectSchemaPaths(props map[string]interface{}, prefix string, out *[]string) {
+	for name, raw := range props {
+		p := name
+		if prefix != "" {
+			p = prefix + "." + name
+		}
+		ps, ok := raw.(map[string]interface{})
+		if !ok {
+			*out = append(*out, p)
+			continue
+		}
+		if sub, ok := ps["properties"].(map[string]interface{}); ok {
+			collectSchemaPaths(sub, p, out)
+		} else if items, ok := ps["items"].(map[string]interface{}); ok {
+			if sub, ok := items["properties"].(map[string]interface{}); ok {
+				collectSchemaPaths(sub, p, out)
+			} else {
+				*out = append(*out, p)
+			}
+		} else {
+			*out = append(*out, p)
+		}
+	}
+}
+
+// collectResponsePaths walks a JSON response and emits dotted paths to leaves.
+func collectResponsePaths(obj interface{}, prefix string, out *[]string) {
+	switch t := obj.(type) {
+	case map[string]interface{}:
+		for k, v := range t {
+			p := k
+			if prefix != "" {
+				p = prefix + "." + k
+			}
+			if isContainer(v) {
+				collectResponsePaths(v, p, out)
+			} else {
+				*out = append(*out, p)
+			}
+		}
+	case []interface{}:
+		for _, v := range t {
+			collectResponsePaths(v, prefix, out)
+		}
+	}
+}
+
+func isContainer(v interface{}) bool {
+	switch v.(type) {
+	case map[string]interface{}, []interface{}:
+		return true
+	}
+	return false
+}
+
+func lastSegment(p string) string {
+	if i := strings.LastIndex(p, "."); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }

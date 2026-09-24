@@ -41,18 +41,31 @@ func run(base, outJSON, outHTML string) error {
 	}
 	fmt.Printf("[*] registered alice (id=%v) and bob (id=%v)\n", userA["id"], userB["id"])
 
-	endpoints := getParamEndpoints(spec)
+	endpoints := allEndpoints(spec)
 	// deterministic order for reproducible output
-	sort.Slice(endpoints, func(i, j int) bool { return endpoints[i].Path < endpoints[j].Path })
-	fmt.Printf("[*] found %d GET endpoint(s) with path parameters\n", len(endpoints))
+	sort.Slice(endpoints, func(i, j int) bool {
+		if endpoints[i].Path == endpoints[j].Path {
+			return endpoints[i].Method < endpoints[j].Method
+		}
+		return endpoints[i].Path < endpoints[j].Path
+	})
+	fmt.Printf("[*] found %d operation(s)\n", len(endpoints))
 
 	aToken, _ := userA["token"].(string)
 
 	var findings []finding
-	seen := map[string]bool{}
+	seenBola := map[string]bool{}
 	for _, ep := range endpoints {
-		findings = append(findings, checkBola(client, base, ep, userA, userB, aToken, seen)...)
-		findings = append(findings, checkExposure(client, base, ep, userA, aToken)...)
+		// baseline = a 200 response for A's own resource (or direct call)
+		filled, body := resolveBaseline(client, base, ep, userA, aToken)
+
+		findings = append(findings, checkBola(client, base, ep, userA, userB, aToken, seenBola)...)
+		if filled != "" && body != nil {
+			findings = append(findings, checkExposure(ep, body, base, filled, aToken)...)
+		}
+		if opHasSecurity(ep.Op) && filled != "" {
+			findings = append(findings, checkMissingAuth(client, ep, base, filled)...)
+		}
 	}
 
 	sort.SliceStable(findings, func(i, j int) bool {
@@ -94,52 +107,88 @@ func registerUser(client *http.Client, base, username string) (map[string]interf
 	return v, nil
 }
 
-func doGet(client *http.Client, url, token string) (int, interface{}, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+// doRequest performs a request of any method. Write methods get a minimal JSON
+// body. An empty token means no Authorization header is sent.
+func doRequest(client *http.Client, method, url, token string) (int, interface{}, error) {
+	var body io.Reader
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch:
+		body = bytes.NewReader([]byte("{}"))
+	}
+	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return 0, nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
-	var body interface{}
-	if err := json.Unmarshal(data, &body); err != nil {
-		body = nil
+	var parsed interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		parsed = nil
 	}
-	return resp.StatusCode, body, nil
+	return resp.StatusCode, parsed, nil
 }
 
-// checkBola is the cross-principal differential test: substitute B's identifier
-// into the path while presenting A's token, and flag if B-owned data comes back.
+// resolveBaseline finds a 200 response for A's own resource (substituting A's
+// identifiers into a single path param) or, for paths with no params, a direct
+// call. Returns the filled path and the response body, or ""/nil if none.
+func resolveBaseline(client *http.Client, base string, ep endpoint, a map[string]interface{}, aToken string) (string, interface{}) {
+	params := pathParams(ep.Path)
+	if len(params) == 1 {
+		for _, m := range markersFromUser(a) {
+			cand := strings.Replace(ep.Path, "{"+params[0]+"}", m.Str, 1)
+			status, body, err := doRequest(client, ep.Method, base+cand, aToken)
+			if err == nil && status == http.StatusOK {
+				return cand, body
+			}
+		}
+		return "", nil
+	}
+	status, body, err := doRequest(client, ep.Method, base+ep.Path, aToken)
+	if err == nil && status == http.StatusOK {
+		return ep.Path, body
+	}
+	return "", nil
+}
+
+// checkBola is the cross-principal differential test (any HTTP method): substitute
+// B's identifier into the path while presenting A's token, and flag if B-owned
+// data comes back.
 func checkBola(client *http.Client, base string, ep endpoint, a, b map[string]interface{}, aToken string, seen map[string]bool) []finding {
 	params := pathParams(ep.Path)
 	if len(params) != 1 {
 		return nil
 	}
+	key := ep.Method + " " + ep.Path
 	bMarkers := markersFromUser(b)
 	var out []finding
 	for _, sub := range bMarkers {
 		filled := strings.Replace(ep.Path, "{"+params[0]+"}", sub.Str, 1)
-		status, body, err := doGet(client, base+filled, aToken)
+		status, body, err := doRequest(client, ep.Method, base+filled, aToken)
 		if err != nil || status != http.StatusOK {
 			continue
 		}
 		for _, m := range bMarkers {
 			if containsValue(body, m.Str) {
-				if seen[ep.Path] {
+				if seen[key] {
 					break
 				}
-				seen[ep.Path] = true
+				seen[key] = true
 				out = append(out, finding{
 					Severity: "CRITICAL",
 					Title:    "Broken Object-Level Authorization (BOLA / IDOR)",
-					Endpoint: ep.Method + " " + ep.Path,
+					Endpoint: key,
 					Detail: fmt.Sprintf(
-						"Account '%s' (token A) fetched %s and received data owned by '%s' (field %s=%s). No ownership check is enforced.",
+						"Account '%s' (token A) called %s and received data owned by '%s' (field %s=%s). No ownership check is enforced.",
 						str(a["username"]), filled, str(b["username"]), m.Key, repr(m.Raw)),
 					Reproduction: curlRepro(ep.Method, base, filled, aToken),
 					Evidence:     []map[string]interface{}{{m.Key: m.Raw}},
@@ -151,57 +200,33 @@ func checkBola(client *http.Client, base string, ep endpoint, a, b map[string]in
 	return out
 }
 
-// checkExposure diffs the actual response keys against the declared schema keys.
-func checkExposure(client *http.Client, base string, ep endpoint, a map[string]interface{}, aToken string) []finding {
-	params := pathParams(ep.Path)
-	if len(params) != 1 {
-		return nil
-	}
-	declared, ok := declaredKeys(ep.Op)
+// checkExposure recursively diffs the actual response paths against the declared
+// schema paths, flagging undeclared fields (including nested ones).
+func checkExposure(ep endpoint, body interface{}, base, filled, aToken string) []finding {
+	declared, ok := schemaPaths(ep.Op)
 	if !ok {
 		return nil
 	}
 
-	aMarkers := markersFromUser(a)
-	var body interface{}
-	var filled string
-	for _, m := range aMarkers {
-		cand := strings.Replace(ep.Path, "{"+params[0]+"}", m.Str, 1)
-		status, b, err := doGet(client, base+cand, aToken)
-		if err != nil {
-			continue
-		}
-		if status == http.StatusOK {
-			body = b
-			filled = cand
-			break
-		}
-	}
-	if body == nil || filled == "" {
-		return nil
-	}
-
-	obj, ok := body.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	actual := make(map[string]bool, len(obj))
-	for k := range obj {
-		actual[k] = true
+	var respPaths []string
+	collectResponsePaths(body, "", &respPaths)
+	actual := make(map[string]bool, len(respPaths))
+	for _, p := range respPaths {
+		actual[p] = true
 	}
 
 	var extras []string
-	for k := range actual {
-		if !declared[k] {
-			extras = append(extras, k)
+	for p := range actual {
+		if !declared[p] {
+			extras = append(extras, p)
 		}
 	}
 	sort.Strings(extras)
 
 	var out []finding
-	for _, k := range extras {
+	for _, p := range extras {
 		sev := "MEDIUM"
-		if sensitive(k) {
+		if sensitive(lastSegment(p)) {
 			sev = "HIGH"
 		}
 		out = append(out, finding{
@@ -210,10 +235,10 @@ func checkExposure(client *http.Client, base string, ep endpoint, a map[string]i
 			Endpoint: ep.Method + " " + ep.Path,
 			Detail: fmt.Sprintf(
 				"Field '%s' is returned in the response but is NOT declared in the OpenAPI response schema. The client receives more data than the contract specifies.",
-				k),
+				p),
 			Reproduction: curlRepro(ep.Method, base, filled, aToken),
 			Evidence: []map[string]interface{}{{
-				"undeclared_field": k,
+				"undeclared_field": p,
 				"declared_fields":  sortedKeys(declared),
 			}},
 		})
@@ -221,8 +246,34 @@ func checkExposure(client *http.Client, base string, ep endpoint, a map[string]i
 	return out
 }
 
+// checkMissingAuth flags endpoints that DECLARE a security requirement in the
+// spec but return data (HTTP 200) with no Authorization header at all.
+func checkMissingAuth(client *http.Client, ep endpoint, base, filled string) []finding {
+	status, body, err := doRequest(client, ep.Method, base+filled, "")
+	if err != nil || status != http.StatusOK {
+		return nil
+	}
+	if body == nil {
+		return nil
+	}
+	return []finding{{
+		Severity: "HIGH",
+		Title:    "Broken Authentication",
+		Endpoint: ep.Method + " " + ep.Path,
+		Detail: fmt.Sprintf(
+			"The spec declares an API-key security requirement for %s, but it returns data with no Authorization header (HTTP 200).",
+			ep.Method+" "+ep.Path),
+		Reproduction: curlNoAuth(ep.Method, base, filled),
+		Evidence:     []map[string]interface{}{{"http_status": 200}},
+	}}
+}
+
 func curlRepro(method, base, path, token string) string {
 	return fmt.Sprintf("curl -s -H 'Authorization: Bearer %s' '%s%s'", token, base, path)
+}
+
+func curlNoAuth(method, base, path string) string {
+	return fmt.Sprintf("curl -s -X %s '%s%s'", method, base, path)
 }
 
 func str(v interface{}) string {

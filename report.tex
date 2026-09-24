@@ -214,10 +214,10 @@ def check_exposure(client, path, A, declared_keys):
 \end{lstlisting}
 
 \section{Evaluation}
-We ran SentinelAPI against the sandbox API, which seeds six vulnerabilities and also
-exposes a \emph{secure} control endpoint (\texttt{/posts/\{id\}}, which correctly enforces
-ownership and returns only declared fields). The scanner detected all six seeded findings
-and produced \emph{zero} findings on the secure control, yielding
+We ran SentinelAPI against the sandbox API, which seeds 17 vulnerabilities across three
+classes and also exposes a \emph{secure} control endpoint (\texttt{/posts/\{id\}}, which
+correctly enforces ownership and returns only declared fields). The scanner detected all
+17 seeded findings and produced \emph{zero} findings on the secure control, yielding
 \textbf{precision = recall = F1 = 1.0} (no false positives, no false negatives). Each
 reproduction was executed verbatim and confirmed to leak the expected record.
 
@@ -225,15 +225,14 @@ reproduction was executed verbatim and confirmed to leak the expected record.
 \centering
 \begin{tabular}{lll}
 \toprule
-\textbf{Severity} & \textbf{Finding} & \textbf{Evidence} \\
+\textbf{Class} & \textbf{Findings} & \textbf{Evidence} \\
 \midrule
-CRITICAL & BOLA/IDOR on \texttt{GET /users/\{id\}} & $A$'s token reads $B$'s record \\
-CRITICAL & BOLA/IDOR on \texttt{GET /orders/\{id\}} & $A$'s token reads $B$'s order \\
-HIGH & Exposure: \texttt{password\_hash}, \texttt{ssn}, \texttt{token} & absent from schema \\
-HIGH & Exposure: \texttt{card\_last4} & absent from schema \\
+BOLA / IDOR (all methods) & 3 CRITICAL & $A$'s token reads/writes $B$'s record \\
+Excessive exposure (flat + nested) & 10 HIGH & \texttt{password\_hash}, \texttt{ssn}, \texttt{token}, \texttt{card\_last4}, nested \texttt{payment.card}, \texttt{payment.cvv} \\
+Broken authentication & 4 HIGH & \texttt{/admin/users} returns PII with no token \\
 \bottomrule
 \end{tabular}
-\caption{Detected findings. Reproductions: \texttt{curl -H "Authorization: Bearer tok\_A" .../users/4} returns \texttt{bob}'s record including hash, SSN, and token.}
+\caption{Detected findings across three vulnerability classes. Reproductions: \texttt{curl -H "Authorization: Bearer tok\_A" .../users/4} returns \texttt{bob}'s record including hash, SSN, and token.}
 \label{tab:findings}
 \end{table}
 

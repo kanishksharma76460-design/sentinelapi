@@ -121,9 +121,9 @@ def main() -> int:
                 print("scan error:", st["error"])
                 return 1
         print("findings:", len(findings))
-        assert len(findings) == 6, f"expected 6 findings, got {len(findings)}"
+        assert len(findings) == 17, f"expected 17 findings, got {len(findings)}"
 
-        print("RESULT: PASS ✅  (health, consent, SSRF guard, 6 findings)")
+        print("RESULT: PASS ✅  (health, consent, SSRF guard, 17 findings)")
         return 0
     finally:
         bk.terminate(); bk.wait()

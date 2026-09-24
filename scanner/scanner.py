@@ -2,15 +2,15 @@
 SentinelAPI — the scanner engine.
 
 Takes a target API's OpenAPI spec + base URL, registers two principals, and runs
-two vulnerability classes:
+three vulnerability classes:
 
-  1. BOLA / IDOR            — cross-account differential test: call each
-                              resource endpoint with account A's token but
-                              account B's resource identifier; if B-owned data
-                              comes back, the endpoint is flagged CRITICAL.
-  2. Excessive data exposure — diff the *actual* response keys against the
-                              keys declared in the OpenAPI response schema;
-                              any undeclared, sensitive-looking key is flagged.
+  1. BOLA / IDOR            — cross-account differential test across ALL HTTP
+                              methods; if B-owned data comes back under A's
+                              token, the endpoint is flagged CRITICAL.
+  2. Excessive data exposure — recursively diff actual response paths against
+                              the schema (including nested objects).
+  3. Broken authentication  — endpoints that declare a security requirement
+                              but return data with no token are flagged HIGH.
 
 Outputs:
   findings.json   — machine-readable results
@@ -78,14 +78,15 @@ def register(client: httpx.Client, base: str, username: str) -> dict:
     return r.json()
 
 
-def get_param_endpoints(spec: dict) -> list[tuple[str, str, dict]]:
-    """Return [(method, path, operation)] for GET endpoints with path params."""
+HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
+
+
+def all_endpoints(spec: dict) -> list[tuple[str, str, dict]]:
+    """Return [(method, path, operation)] for every operation in the spec."""
     out = []
     for path, methods in spec.get("paths", {}).items():
-        if "{" not in path:
-            continue
         for method, op in methods.items():
-            if method.lower() == "get":
+            if isinstance(op, dict) and method.lower() in HTTP_METHODS:
                 out.append((method.upper(), path, op))
     return out
 
@@ -107,13 +108,55 @@ def contains_value(obj, target) -> bool:
     return False
 
 
-def schema_keys(op: dict) -> set | None:
-    """Extract declared response property names, or None if undeclared."""
+def op_has_security(op: dict) -> bool:
+    return bool(op and op.get("security"))
+
+
+def schema_paths(op: dict) -> set | None:
+    """Return dotted paths declared in the 200 response schema, or None."""
     try:
         props = op["responses"]["200"]["content"]["application/json"]["schema"]["properties"]
-        return set(props.keys())
     except (KeyError, TypeError):
         return None
+
+    out: set[str] = set()
+
+    def walk(p, prefix=""):
+        for name, raw in p.items():
+            path = f"{prefix}.{name}" if prefix else name
+            if isinstance(raw, dict):
+                if "properties" in raw:
+                    walk(raw["properties"], path)
+                elif isinstance(raw.get("items"), dict) and "properties" in raw["items"]:
+                    walk(raw["items"]["properties"], path)
+                else:
+                    out.add(path)
+            else:
+                out.add(path)
+
+    walk(props)
+    return out
+
+
+def collect_response_paths(obj, prefix="", out=None):
+    """Return dotted paths to every leaf in a JSON response."""
+    if out is None:
+        out = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            p = f"{prefix}.{k}" if prefix else k
+            if isinstance(v, (dict, list)):
+                collect_response_paths(v, p, out)
+            else:
+                out.append(p)
+    elif isinstance(obj, list):
+        for v in obj:
+            collect_response_paths(v, prefix, out)
+    return out
+
+
+def last_segment(p: str) -> str:
+    return p.rsplit(".", 1)[-1]
 
 
 def sensitive(key: str) -> bool:
@@ -125,40 +168,46 @@ def curl_repro(method: str, base: str, path: str, token: str) -> str:
     return f"curl -s -H 'Authorization: Bearer {token}' '{base}{path}'"
 
 
-# ---------------------------------------------------------------------------
-# checks
-# ---------------------------------------------------------------------------
+def curl_no_auth(method: str, base: str, path: str) -> str:
+    return f"curl -s -X {method} '{base}{path}'"
+
+
+def do_request(client, method, url, token):
+    """Request of any method. Write methods get a minimal JSON body; an empty
+    token means no Authorization header is sent."""
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    kwargs = {"headers": headers}
+    if method in ("POST", "PUT", "PATCH"):
+        kwargs["json"] = {}
+    r = client.request(method, url, **kwargs)
+    try:
+        return r.status_code, r.json()
+    except ValueError:
+        return r.status_code, None
 def check_bola(client, base, endpoint, user_a, user_b, seen) -> list[Finding]:
-    """Cross-account differential test for broken object-level authorization."""
+    """Cross-account differential test for broken object-level authorization (any method)."""
     findings = []
     method, path, _op = endpoint
     params = path_params(path)
     if len(params) != 1:
         return findings
 
-    # values owned by B — if any comes back under A's session, that's a leak.
     b_markers = {k: user_b[k] for k in IDENTIFIER_FIELDS if k in user_b}
-
     for marker_key, marker_val in b_markers.items():
         filled = path.replace("{" + params[0] + "}", str(marker_val))
         try:
-            r = client.request(
-                method, base + filled,
-                headers={"Authorization": f"Bearer {user_a['token']}"},
-            )
+            status, body = do_request(client, method, base + filled, user_a["token"])
         except httpx.HTTPError as exc:
             print(f"  [!] request error on {filled}: {exc}", file=sys.stderr)
             continue
-        if r.status_code != 200:
+        if status != 200:
             continue
-        try:
-            body = r.json()
-        except json.JSONDecodeError:
-            body = None
 
         for mk, mv in b_markers.items():
             if mv is not None and contains_value(body, mv):
-                key = ("BOLA", path)
+                key = ("BOLA", method, path)
                 if key in seen:
                     continue
                 seen.add(key)
@@ -167,10 +216,9 @@ def check_bola(client, base, endpoint, user_a, user_b, seen) -> list[Finding]:
                     title="Broken Object-Level Authorization (BOLA / IDOR)",
                     endpoint=f"{method} {path}",
                     detail=(
-                        f"Account '{user_a['username']}' (token A) fetched "
-                        f"{filled} and received data owned by "
-                        f"'{user_b['username']}' (field {mk}={mv!r}). No "
-                        "ownership check is enforced."
+                        f"Account '{user_a['username']}' (token A) called {filled} "
+                        f"and received data owned by '{user_b['username']}' "
+                        f"(field {mk}={mv!r}). No ownership check is enforced."
                     ),
                     reproduction=curl_repro(method, base, filled, user_a["token"]),
                     evidence=[{mk: mv}],
@@ -179,46 +227,18 @@ def check_bola(client, base, endpoint, user_a, user_b, seen) -> list[Finding]:
     return findings
 
 
-def check_exposure(client, base, endpoint, user_a) -> list[Finding]:
-    """Diff actual response keys vs declared schema keys."""
+def check_exposure(endpoint, body, base, filled, user_a) -> list[Finding]:
+    """Recursively diff actual response paths vs declared schema paths."""
     method, path, op = endpoint
-    params = path_params(path)
-    if len(params) != 1:
-        return []
-    declared = schema_keys(op)
+    declared = schema_paths(op)
     if declared is None:
-        return []  # no declared schema -> nothing to diff against
-
-    # fetch A's own resource to get a 200 baseline; the path param may map to
-    # any of A's identifier fields (id, order_id, ...), so try each in turn.
-    a_markers = {k: user_a[k] for k in IDENTIFIER_FIELDS if k in user_a}
-    body = None
-    filled = None
-    for _mk, mv in a_markers.items():
-        candidate = path.replace("{" + params[0] + "}", str(mv))
-        try:
-            r = client.request(
-                method, base + candidate,
-                headers={"Authorization": f"Bearer {user_a['token']}"},
-            )
-        except httpx.HTTPError as exc:
-            print(f"  [!] request error on {candidate}: {exc}", file=sys.stderr)
-            continue
-        if r.status_code == 200:
-            try:
-                body = r.json()
-            except json.JSONDecodeError:
-                body = None
-            filled = candidate
-            break
-    if body is None or filled is None:
         return []
 
-    actual = set(body.keys()) if isinstance(body, dict) else set()
+    actual = set(collect_response_paths(body))
     extras = actual - declared
     findings = []
     for key in sorted(extras):
-        sev = "HIGH" if sensitive(key) else "MEDIUM"
+        sev = "HIGH" if sensitive(last_segment(key)) else "MEDIUM"
         findings.append(Finding(
             severity=sev,
             title="Excessive Data Exposure",
@@ -232,6 +252,28 @@ def check_exposure(client, base, endpoint, user_a) -> list[Finding]:
             evidence=[{"undeclared_field": key, "declared_fields": sorted(declared)}],
         ))
     return findings
+
+
+def check_missing_auth(client, endpoint, base, filled) -> list[Finding]:
+    """Flag endpoints that declare security but return data with no token."""
+    method, path, _op = endpoint
+    try:
+        status, body = do_request(client, method, base + filled, "")
+    except httpx.HTTPError:
+        return []
+    if status != 200 or body is None:
+        return []
+    return [Finding(
+        severity="HIGH",
+        title="Broken Authentication",
+        endpoint=f"{method} {path}",
+        detail=(
+            f"The spec declares an API-key security requirement for {method} {path}, "
+            "but it returns data with no Authorization header (HTTP 200)."
+        ),
+        reproduction=curl_no_auth(method, base, filled),
+        evidence=[{"http_status": 200}],
+    )]
 
 
 # ---------------------------------------------------------------------------
@@ -328,14 +370,41 @@ def main() -> int:
     user_b = register(client, base, "bob")
     print(f"[*] registered alice (id={user_a['id']}) and bob (id={user_b['id']})")
 
-    endpoints = get_param_endpoints(spec)
-    print(f"[*] found {len(endpoints)} GET endpoint(s) with path parameters")
+    endpoints = all_endpoints(spec)
+    print(f"[*] found {len(endpoints)} operation(s)")
+
+    a_token = user_a["token"]
+
+    def resolve_baseline(ep):
+        method, path, _op = ep
+        params = path_params(path)
+        if len(params) == 1:
+            for k in IDENTIFIER_FIELDS:
+                if k not in user_a:
+                    continue
+                cand = path.replace("{" + params[0] + "}", str(user_a[k]))
+                try:
+                    status, body = do_request(client, method, base + cand, a_token)
+                except httpx.HTTPError:
+                    continue
+                if status == 200:
+                    return cand, body
+            return "", None
+        try:
+            status, body = do_request(client, method, base + path, a_token)
+        except httpx.HTTPError:
+            return "", None
+        return (path, body) if status == 200 else ("", None)
 
     findings: list[Finding] = []
     seen: set = set()
     for ep in endpoints:
+        filled, body = resolve_baseline(ep)
         findings += check_bola(client, base, ep, user_a, user_b, seen)
-        findings += check_exposure(client, base, ep, user_a)
+        if filled and body is not None:
+            findings += check_exposure(ep, body, base, filled, user_a)
+        if op_has_security(ep[2]) and filled:
+            findings += check_missing_auth(client, ep, base, filled)
 
     findings.sort(key=lambda f: SEVERITY_ORDER.get(f.severity, 9))
 

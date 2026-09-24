@@ -27,12 +27,26 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # (severity, title, endpoint, undeclared_field_or_None)
 GROUND_TRUTH = {
+    # BOLA / IDOR (all methods)
     ("CRITICAL", "Broken Object-Level Authorization (BOLA / IDOR)", "GET /users/{user_id}", None),
     ("CRITICAL", "Broken Object-Level Authorization (BOLA / IDOR)", "GET /orders/{order_id}", None),
+    ("CRITICAL", "Broken Object-Level Authorization (BOLA / IDOR)", "PUT /users/{user_id}", None),
+    # excessive data exposure (flat + nested)
     ("HIGH", "Excessive Data Exposure", "GET /users/{user_id}", "password_hash"),
     ("HIGH", "Excessive Data Exposure", "GET /users/{user_id}", "ssn"),
     ("HIGH", "Excessive Data Exposure", "GET /users/{user_id}", "token"),
     ("HIGH", "Excessive Data Exposure", "GET /orders/{order_id}", "card_last4"),
+    ("HIGH", "Excessive Data Exposure", "PUT /users/{user_id}", "password_hash"),
+    ("HIGH", "Excessive Data Exposure", "PUT /users/{user_id}", "ssn"),
+    ("HIGH", "Excessive Data Exposure", "PUT /users/{user_id}", "token"),
+    ("HIGH", "Excessive Data Exposure", "GET /users/{user_id}/profile", "profile.ssn"),
+    ("HIGH", "Excessive Data Exposure", "GET /users/{user_id}/profile", "payment.card"),
+    ("HIGH", "Excessive Data Exposure", "GET /users/{user_id}/profile", "payment.cvv"),
+    # broken authentication (declared security, no enforcement)
+    ("HIGH", "Broken Authentication", "GET /users/{user_id}", None),
+    ("HIGH", "Broken Authentication", "GET /orders/{order_id}", None),
+    ("HIGH", "Broken Authentication", "PUT /users/{user_id}", None),
+    ("HIGH", "Broken Authentication", "GET /admin/users", None),
 }
 
 PORT = int(os.environ.get("ACC_PORT", "8011"))

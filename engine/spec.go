@@ -10,11 +10,16 @@ import (
 
 var paramRe = regexp.MustCompile(`\{([^}]+)\}`)
 
-// endpoint is a single GET operation that carries path parameters.
+// endpoint is a single operation (any HTTP method).
 type endpoint struct {
 	Method string
 	Path   string
 	Op     map[string]interface{}
+}
+
+var httpMethods = map[string]bool{
+	"get": true, "post": true, "put": true, "patch": true,
+	"delete": true, "head": true, "options": true, "trace": true,
 }
 
 func fetchJSON(client *http.Client, url string) (map[string]interface{}, error) {
@@ -39,23 +44,21 @@ func fetchSpec(client *http.Client, base string) (map[string]interface{}, error)
 	return fetchJSON(client, base+"/openapi.json")
 }
 
-// getParamEndpoints returns GET endpoints whose path contains {params}.
-func getParamEndpoints(spec map[string]interface{}) []endpoint {
+// allEndpoints returns every operation (any method, any path) in the spec.
+func allEndpoints(spec map[string]interface{}) []endpoint {
 	var out []endpoint
 	paths, _ := spec["paths"].(map[string]interface{})
 	for path, v := range paths {
-		if !strings.Contains(path, "{") {
-			continue
-		}
 		methods, ok := v.(map[string]interface{})
 		if !ok {
 			continue
 		}
 		for method, vv := range methods {
-			if strings.EqualFold(method, "get") {
-				op, _ := vv.(map[string]interface{})
-				out = append(out, endpoint{Method: strings.ToUpper(method), Path: path, Op: op})
+			if !httpMethods[strings.ToLower(method)] {
+				continue
 			}
+			op, _ := vv.(map[string]interface{})
+			out = append(out, endpoint{Method: strings.ToUpper(method), Path: path, Op: op})
 		}
 	}
 	return out

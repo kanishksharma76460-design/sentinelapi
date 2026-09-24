@@ -150,14 +150,13 @@ kanishhacka/
 └── .venv/                # Python 3.13 + fastapi + uvicorn + httpx
 ```
 
-**Detected (verified live):**
+**Detected (verified live) — 3 vulnerability classes, 17 findings:**
 
-| Severity | Finding | Proof |
+| Class | Findings | Example proof |
 |---|---|---|
-| CRITICAL | BOLA / IDOR on `GET /users/{user_id}` | `curl -H 'Authorization: Bearer tok_A' …/users/4` returns bob's record |
-| CRITICAL | BOLA / IDOR on `GET /orders/{order_id}` | same, returns bob's `card_last4` |
-| HIGH | Excessive exposure — `password_hash`, `ssn`, `token` | returned but absent from OpenAPI schema |
-| HIGH | Excessive exposure — `card_last4` | returned but absent from OpenAPI schema |
+| **BOLA / IDOR** (all methods) | 3 CRITICAL | `curl -H 'Authorization: Bearer tok_A' …/users/4` returns bob's record; `PUT` also leaks |
+| **Excessive data exposure** (flat + nested) | 10 HIGH | `password_hash`, `ssn`, `token`, `card_last4`, and nested `payment.card`/`payment.cvv`/`profile.ssn` |
+| **Broken authentication** (declared security, not enforced) | 4 HIGH | `curl -s …/admin/users` returns everyone's PII with no token |
 
 **Run it:**
 ```bash
@@ -173,22 +172,19 @@ open scanner/report.html
 
 **Two engines, one contract.** The Go engine (`engine/`) and the Python scanner
 (`scanner/scanner.py`) emit the **same `findings.json` schema** and produce identical
-results — verified by a parity check (both report the same 6 findings). The Go engine
+results — verified by a parity check (both report the same 17 findings). The Go engine
 is stdlib-only, compiles to a single static binary, and is the demo default; Python
 is kept as the readable reference implementation.
 
-**How the oracle works (the core trick):**
+**How the oracles work:**
 1. Register two principals A and B.
-2. *BOLA* — call each `{id}` endpoint with **A's token but B's identifier**; if B-owned
-   data (id/email/username) appears in the response, it's a cross-account leak.
-3. *Exposure* — diff the **actual response keys** vs the keys **declared in the
-   OpenAPI schema**; any undeclared sensitive key (password/ssn/card/token) is flagged.
-4. Every finding ships a copy-paste `curl` reproduction + evidence diff → zero false-positive noise.
-
-**Extending:** add a third class (missing auth / rate-limit probing) in `oracle.go`
-and `scanner.go`; the engine's sequential loop can be fanned out over goroutines for
-high-concurrency scanning of large specs (its I/O-bound design makes concurrency the
-scaling lever, not CPU).
+2. *BOLA* — for every HTTP method, call each `{id}` endpoint with **A's token but B's
+   identifier**; if B-owned data comes back, it's a cross-account leak.
+3. *Exposure* — recursively diff the **actual response paths** vs the paths **declared
+   in the OpenAPI schema**; any undeclared sensitive key (incl. nested ones) is flagged.
+4. *Broken auth* — if the spec **declares a security requirement** but the endpoint
+   returns data with **no token**, flag it.
+5. Every finding ships a copy-paste `curl` reproduction + evidence diff → zero false-positive noise.
 
 ---
 
@@ -233,7 +229,7 @@ truth — including a **secure control endpoint** (`/posts/{id}`) that must prod
 
 | Metric | Go engine | Python engine |
 |---|---|---|
-| True positives | 6/6 | 6/6 |
+| True positives | 17/17 | 17/17 |
 | False positives | 0 | 0 |
 | False negatives | 0 | 0 |
 | Secure-endpoint findings | 0 | 0 |
@@ -242,4 +238,4 @@ truth — including a **secure control endpoint** (`/posts/{id}`) that must prod
 Run it: `python tests/accuracy.py` (and `ENGINE=python python tests/accuracy.py`).
 
 `tests/e2e_backend.py` additionally verifies the hosted backend: health, consent
-enforcement, SSRF blocking, and a full scan returning the 6 findings.
+enforcement, SSRF blocking, and a full scan returning the 17 findings.

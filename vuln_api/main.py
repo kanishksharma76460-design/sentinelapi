@@ -2,22 +2,30 @@
 SentinelAPI — deliberately vulnerable sandbox API (demo target).
 
 This app is INTENTIONALLY insecure. It exists so the scanner has a deterministic
-target with seeded, known vulnerabilities:
+target with seeded, known vulnerability classes:
 
-  1. BOLA / IDOR            — /users/{user_id} and /orders/{order_id} perform no
-                              object-level authorization: any authenticated
-                              token can read any user's / order's record.
-  2. Excessive data exposure — the OpenAPI spec *declares* a minimal schema
-                              (id, username, email) but the endpoints return
-                              extra sensitive fields (password_hash, ssn, token,
-                              card_last4). The scanner detects the mismatch.
+  1. BOLA / IDOR            — no object-level authorization on resource reads
+                              AND writes (any token can read/update any record).
+  2. Excessive data exposure — spec declares a minimal schema but responses leak
+                              extra fields, including NESTED ones.
+  3. Broken authentication  — the spec declares an API-key security requirement,
+                              but endpoints return data with no token at all.
+
+A SECURE control endpoint (/posts/{id}) and an ownership-checked endpoint
+(/users/{id}/profile) exist so accuracy can be measured against known negatives.
 
 Run:  uvicorn vuln_api.main:app --port 8000
 """
 from __future__ import annotations
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import Body, Depends, FastAPI, Header, HTTPException
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
+
+# The spec DECLARES that every endpoint requires an API key in the Authorization
+# header. auto_error=False means FastAPI does NOT enforce it — only documents it.
+# This is exactly the "declared-but-not-enforced" auth gap the scanner detects.
+_api_key = APIKeyHeader(name="Authorization", auto_error=False)
 
 app = FastAPI(
     title="Sandbox Bank API",
@@ -90,6 +98,25 @@ _POST_PUBLIC_SCHEMA = {
     },
 }
 
+# Declares only profile.bio, but the handler returns NESTED sensitive data
+# (profile.ssn, payment.card, payment.cvv) — a nested-exposure flaw.
+_PROFILE_PUBLIC_SCHEMA = {
+    "description": "User profile (secure)",
+    "content": {
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "profile": {
+                        "type": "object",
+                        "properties": {"bio": {"type": "string"}},
+                    }
+                },
+            }
+        }
+    },
+}
+
 
 @app.post("/register", status_code=201)
 def register(body: RegisterBody):
@@ -131,7 +158,7 @@ def register(body: RegisterBody):
     }
 
 
-@app.get("/users/{user_id}", responses={200: _USER_PUBLIC_SCHEMA})
+@app.get("/users/{user_id}", responses={200: _USER_PUBLIC_SCHEMA}, dependencies=[Depends(_api_key)])
 def get_user(user_id: int, authorization: str = Header(default="")):
     """
     FLAW 1 (IDOR): no check that the caller owns `user_id`.
@@ -143,7 +170,7 @@ def get_user(user_id: int, authorization: str = Header(default="")):
     return user  # leaks the whole dict, including fields absent from the schema
 
 
-@app.get("/orders/{order_id}", responses={200: _ORDER_PUBLIC_SCHEMA})
+@app.get("/orders/{order_id}", responses={200: _ORDER_PUBLIC_SCHEMA}, dependencies=[Depends(_api_key)])
 def get_order(order_id: int, authorization: str = Header(default="")):
     """
     FLAW 3 (IDOR): no check that the caller owns `order_id`.
@@ -155,7 +182,7 @@ def get_order(order_id: int, authorization: str = Header(default="")):
     raise HTTPException(status_code=404, detail="order not found")
 
 
-@app.get("/posts/{post_id}", responses={200: _POST_PUBLIC_SCHEMA})
+@app.get("/posts/{post_id}", responses={200: _POST_PUBLIC_SCHEMA}, dependencies=[Depends(_api_key)])
 def get_post(post_id: int, authorization: str = Header(default="")):
     """SECURE control: ownership is enforced and only declared fields are returned."""
     token = authorization.removeprefix("Bearer ")
@@ -165,6 +192,57 @@ def get_post(post_id: int, authorization: str = Header(default="")):
                 raise HTTPException(status_code=403, detail="forbidden")
             return {"post_id": post["post_id"], "title": post["title"], "body": post["body"]}
     raise HTTPException(status_code=404, detail="post not found")
+
+
+@app.put("/users/{user_id}", responses={200: _USER_PUBLIC_SCHEMA}, dependencies=[Depends(_api_key)])
+def update_user(user_id: int, authorization: str = Header(default=""), body: dict | None = Body(default=None)):
+    """
+    FLAW: no ownership check on WRITE — any token can update any user's record.
+    Also returns the full record (exposure) and needs no auth at all.
+    """
+    user = _USERS.get(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    if body:
+        user.update(body)  # mass-assignment: arbitrary fields accepted
+    return user
+
+
+@app.get("/users/{user_id}/profile", responses={200: _PROFILE_PUBLIC_SCHEMA}, dependencies=[Depends(_api_key)])
+def get_profile(user_id: int, authorization: str = Header(default="")):
+    """
+    SECURE ownership check, but leaks NESTED sensitive data that the schema hides.
+    """
+    token = authorization.removeprefix("Bearer ")
+    user = _USERS.get(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    if user["token"] != token:
+        raise HTTPException(status_code=403, detail="forbidden")
+    return {
+        "profile": {
+            "bio": f"hello from {user['username']}",
+            "ssn": user["ssn"],                        # nested leak (absent from schema)
+        },
+        "payment": {                                    # whole subtree absent from schema
+            "card": _ORDERS[user_id]["card_last4"],
+            "cvv": "123",
+        },
+    }
+
+
+@app.get("/admin/users", dependencies=[Depends(_api_key)])
+def admin_users():
+    """
+    FLAW: broken authentication — should be admin-only, but returns everyone's
+    PII with no authentication whatsoever.
+    """
+    return {
+        "users": [
+            {"id": u["id"], "username": u["username"], "email": u["email"], "ssn": u["ssn"]}
+            for u in _USERS.values()
+        ]
+    }
 
 
 @app.get("/health")
