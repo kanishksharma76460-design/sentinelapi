@@ -27,7 +27,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -156,3 +156,81 @@ def scan_status(job_id: str):
         "findings": json.loads(findings) if findings else [],
         "error": error,
     }
+
+
+@app.get("/api/scans")
+def list_scans():
+    """Recent scans with per-severity counts, for the dashboard history panel."""
+    with _lock:
+        rows = _conn.execute(
+            "SELECT id, target, status, findings, created_at FROM scans"
+            " ORDER BY created_at DESC LIMIT 20").fetchall()
+    scans = []
+    for job_id, target, status, findings, created_at in rows:
+        fs = json.loads(findings) if findings else []
+        counts: dict = {}
+        for f in fs:
+            sev = f.get("severity", "LOW")
+            counts[sev] = counts.get(sev, 0) + 1
+        sample = [{
+            "severity": f.get("severity", "LOW"),
+            "title": f.get("title", ""),
+            "endpoint": f.get("endpoint", ""),
+        } for f in fs[:3]]
+        scans.append({
+            "job_id": job_id,
+            "target": target,
+            "status": status,
+            "created_at": created_at,
+            "findings": len(fs),
+            "counts": counts,
+            "sample": sample,
+        })
+    return {"scans": scans}
+
+
+def _render_report(target: str, findings: list) -> str:
+    cards = []
+    for f in findings:
+        sev = f.get("severity", "LOW")
+        color = {"CRITICAL": "#f43f5e", "HIGH": "#fb923c",
+                 "MEDIUM": "#facc15", "LOW": "#60a5fa"}.get(sev, "#8b96ad")
+        cards.append(
+            f'<div style="background:#161b22;border:1px solid #30363d;'
+            f'border-radius:12px;padding:16px;margin:12px 0;">'
+            f'<span style="background:{color};color:#fff;font-size:11px;'
+            f'font-weight:800;padding:3px 10px;border-radius:999px;">{sev}</span> '
+            f'<b>{f.get("title", "")}</b><br/>'
+            f'<code style="color:#79c0ff;font-size:13px;">{f.get("endpoint", "")}</code>'
+            f'<p style="color:#c9d1d9;font-size:13px;">{f.get("detail", "")}</p>'
+            f'<pre style="background:#0d1117;padding:10px;border-radius:8px;'
+            f'color:#7ee787;font-size:12px;overflow-x:auto;">'
+            f'{f.get("reproduction", "")}</pre></div>')
+    body = "".join(cards) or '<p style="color:#8b96ad;">No vulnerabilities detected ✓</p>'
+    return (
+        '<!doctype html><html><head><meta charset="utf-8"/>'
+        '<title>SentinelAPI Report</title></head>'
+        '<body style="background:#0d1117;color:#e6edf3;font-family:system-ui,'
+        'sans-serif;padding:32px;max-width:820px;margin:0 auto;">'
+        f'<h1 style="font-size:22px;">Security Scan Report</h1>'
+        f'<p style="color:#8b96ad;">Target: {target} · {len(findings)} finding(s)</p>'
+        f'{body}</body></html>')
+
+
+@app.get("/api/scan/{job_id}/report")
+def scan_report(job_id: str):
+    """Download a self-contained HTML report for a completed scan."""
+    with _lock:
+        row = _conn.execute(
+            "SELECT target, status, findings FROM scans WHERE id=?",
+            (job_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "scan not found")
+    target, status, findings = row
+    if status != "done":
+        raise HTTPException(409, "scan is not complete")
+    html = _render_report(target, json.loads(findings) if findings else [])
+    return Response(
+        content=html, media_type="text/html",
+        headers={"Content-Disposition": f'attachment; filename="sentinelapi-{job_id[:8]}.html"'},
+    )

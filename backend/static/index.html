@@ -339,7 +339,7 @@
       <!-- Top Right: Vulnerability Summary -->
       <section class="panel">
         <div class="sum-title">VULNERABILITY SUMMARY <span>•••</span></div>
-        <div class="sum-counts">
+        <div class="sum-counts" id="summaryCounts">
           <div class="sc"><span class="sc-val cr">4</span><span class="sc-lbl">CRITICAL</span></div>
           <div class="sc"><span class="sc-val hi">12</span><span class="sc-lbl">HIGH</span></div>
           <div class="sc"><span class="sc-val md">3</span><span class="sc-lbl">MEDIUM</span></div>
@@ -360,7 +360,7 @@
       <!-- Bottom Left: Recent Detections -->
       <section class="panel table-panel">
         <div class="sum-title">RECENT DETECTIONS (LAST 24H) <span>•••</span></div>
-        <table>
+        <table id="recentDetections">
           <tr><th>Endpoint</th><th>Level</th><th>Issue</th><th>Status</th></tr>
           <tr><td>api.example.com</td><td style="color:var(--high)">High</td><td>SQLi</td><td><span class="status-badge st-blocked">Blocked</span></td></tr>
           <tr><td>login.auth.net</td><td style="color:var(--medium)">Medium</td><td>XSS</td><td><span class="status-badge st-req">Remediation Required</span></td></tr>
@@ -370,7 +370,7 @@
       <!-- Bottom Right: Scan History -->
       <section class="panel table-panel">
         <div class="sum-title">SCAN HISTORY (LAST 5) <span>•••</span></div>
-        <table>
+        <table id="scanHistory">
           <tr><th>Endpoint</th><th>Date</th><th>Duration</th><th>Action</th></tr>
           <tr><td>api.example.com</td><td>2024-09-18</td><td>45s</td><td style="cursor:pointer;color:var(--accent);">Report ⭳</td></tr>
           <tr><td>login.auth.net</td><td>2024-09-17</td><td>32s</td><td style="cursor:pointer;color:var(--accent);">Report ⭳</td></tr>
@@ -1084,6 +1084,7 @@ document.getElementById('boot-screen').addEventListener('click', function() {
   this.style.opacity = '0';
   setTimeout(() => this.remove(), 500);
   playLionRoar();
+  loadHistory();
 });
 
 
@@ -1200,6 +1201,7 @@ function render(findings, target) {
   renderStats(findings);
   show($('certWrap'));
   playSuccessTone(); // 🔊 Fire warm ascending interval
+  loadHistory();
 
   if (!findings.length) {
     hide($('cards'));
@@ -1250,7 +1252,59 @@ function renderStats(findings) {
 }
 
 function downloadCert() {
-  alert('Downloading Cryptographic Security Proof Badge…\n\nThis certificate verifies the cryptographic integrity and technical credibility of your API platform.');
+  if (latestJobId) { window.location.href = '/api/scan/' + latestJobId + '/report'; return; }
+  alert('Run a scan first to generate your security report badge.');
+}
+
+/* ============================================================
+   REAL DASHBOARD DATA (wired to /api/scans)
+============================================================ */
+let latestJobId = null;
+
+async function loadHistory() {
+  try {
+    const d = await (await fetch('/api/scans')).json();
+    const scans = d.scans || [];
+    const done = scans.filter(s => s.status === 'done');
+    if (done.length) latestJobId = done[0].job_id;
+    renderSummary(done);
+    renderRecentDetections(done);
+    renderScanHistory(scans);
+  } catch (_) { /* backend unreachable — keep mock placeholders */ }
+}
+
+function renderSummary(done) {
+  const agg = { CRITICAL:0, HIGH:0, MEDIUM:0, LOW:0 };
+  done.forEach(s => Object.entries(s.counts || {}).forEach(([k, v]) => agg[k] = (agg[k] || 0) + v));
+  const el = $('summaryCounts'); if (!el) return;
+  el.innerHTML =
+    `<div class="sc"><span class="sc-val cr">${agg.CRITICAL}</span><span class="sc-lbl">CRITICAL</span></div>` +
+    `<div class="sc"><span class="sc-val hi">${agg.HIGH}</span><span class="sc-lbl">HIGH</span></div>` +
+    `<div class="sc"><span class="sc-val md">${agg.MEDIUM}</span><span class="sc-lbl">MEDIUM</span></div>` +
+    `<div class="sc"><span class="sc-val lo">${agg.LOW}</span><span class="sc-lbl">LOW</span></div>`;
+}
+
+function renderRecentDetections(done) {
+  const el = $('recentDetections'); if (!el) return;
+  const rows = [];
+  done.forEach(s => (s.sample || []).forEach(f => rows.push({ f, target: s.target })));
+  const html = rows.slice(0, 5).map(({ f, target }) => {
+    const color = (SEV[f.severity] || SEV.LOW).color;
+    return `<tr><td>${esc(target)}</td><td style="color:${color}">${esc(f.severity)}</td>` +
+           `<td>${esc(f.title)}</td><td><span class="status-badge st-blocked">Detected</span></td></tr>`;
+  }).join('');
+  if (html) el.innerHTML = `<tr><th>Endpoint</th><th>Level</th><th>Issue</th><th>Status</th></tr>` + html;
+}
+
+function renderScanHistory(scans) {
+  const el = $('scanHistory'); if (!el) return;
+  const html = scans.slice(0, 5).map(s =>
+    `<tr><td>${esc(s.target)}</td><td>${new Date(s.created_at * 1000).toLocaleDateString()}</td>` +
+    `<td>${s.status === 'done' ? (s.findings + ' findings') : esc(s.status)}</td>` +
+    `<td style="cursor:pointer;color:var(--accent);">` +
+    (s.status === 'done' ? `<a href="/api/scan/${s.job_id}/report" style="color:inherit;text-decoration:none;">Report ⭳</a>` : '—') +
+    `</td></tr>`).join('');
+  if (html) el.innerHTML = `<tr><th>Endpoint</th><th>Date</th><th>Duration</th><th>Action</th></tr>` + html;
 }
 
 function showStatus(t) { $('statusText').textContent = t; $('status').style.display = 'flex'; }
