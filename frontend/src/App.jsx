@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import AttackGraph from './components/AttackGraph.jsx'
 import Eye from './components/Eye.jsx'
+import HeroGrid from './components/HeroGrid.jsx'
 import Logo from './components/Logo.jsx'
 import RobotFace from './components/RobotFace.jsx'
 import SynthGrid from './components/SynthGrid.jsx'
@@ -348,6 +349,7 @@ export default function App() {
 
       {/* ── Hero ── */}
       <section className="hero" id="scan">
+        <HeroGrid />
         <div className="eyes-row">
           <Eye open={booted} scanning={scanning} done={!!findings} grade={grade} />
           <Eye open={booted} scanning={scanning} done={!!findings} grade={grade} />

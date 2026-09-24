@@ -218,6 +218,25 @@ body::after {
 .hero h1 .accent { color: var(--cyan); text-shadow: 0 0 24px rgba(57,255,20,.6); }
 .hero p { font-family: var(--mono); font-size: 13px; line-height: 1.7; color: var(--dim); max-width: 540px; margin: 0 auto; }
 
+/* HUD structure behind the eyes */
+.hero-grid {
+  position: absolute; top: -4px; left: 50%; transform: translateX(-50%);
+  width: min(94vw, 820px); height: auto; z-index: 0; pointer-events: none;
+  opacity: .55;
+}
+.hero-grid .hg-line { stroke: rgba(57,255,20,.12); stroke-width: 1; stroke-dasharray: 4 6; }
+.hero-grid .hg-line.v { stroke: rgba(57,255,20,.08); }
+.hero-grid .hg-ring { fill: none; stroke: rgba(57,255,20,.18); stroke-width: 1; }
+.hero-grid .hg-ring.faint { stroke: rgba(57,255,20,.09); }
+.hero-grid .hg-tick { stroke: rgba(57,255,20,.22); stroke-width: 1; }
+.hero-grid .hg-hex { fill: none; stroke: rgba(57,255,20,.28); stroke-width: 1.2; stroke-dasharray: 6 5; }
+.hero-grid .hg-hex.gold { stroke: rgba(251,191,36,.3); stroke-dasharray: 2 6; }
+.hero-grid .hg-spin, .hero-grid .hg-spin-rev { transform-box: fill-box; transform-origin: center; }
+.hero-grid .hg-spin { animation: rgRotate 40s linear infinite; }
+.hero-grid .hg-spin-rev { animation: rgRotate 60s linear infinite reverse; }
+.hero-grid .hg-bracket { fill: none; stroke: rgba(251,191,36,.35); stroke-width: 1.5; }
+.hero-grid .hg-code { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; fill: rgba(143,168,150,.55); }
+
 /* corner brackets */
 .bracket { position: relative; border: 1px solid var(--line); background: var(--panel); }
 .bracket::before, .bracket::after { content: ''; position: absolute; width: 12px; height: 12px; border-color: var(--cyan); border-style: solid; }

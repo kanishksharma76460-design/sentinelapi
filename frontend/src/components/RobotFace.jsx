@@ -96,8 +96,8 @@ export default function RobotFace({ powering = false, terminated = false }) {
         {[0, 60, 120, 180, 240, 300].map(d => (
           <path key={d} d={bladePath(d)} className="rg-blade" />
         ))}
-        <circle cx={CX} cy={CY} r={rPupil} className="rg-pupil" />
-        <circle cx={CX} cy={CY} r={rPupil * 0.45} className="rg-pupil-core" />
+        <polygon points={`${CX - 24},${CY} ${CX - 19},${CY - 6} ${CX + 19},${CY - 6} ${CX + 24},${CY} ${CX + 19},${CY + 6} ${CX - 19},${CY + 6}`} className="rg-pupil" />
+        <polygon points={`${CX - 12},${CY} ${CX - 9},${CY - 3} ${CX + 9},${CY - 3} ${CX + 12},${CY} ${CX + 9},${CY + 3} ${CX - 9},${CY + 3}`} className="rg-pupil-core" />
       </g>
 
       {/* gold vertex markers on outer hexagon */}
