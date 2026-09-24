@@ -240,7 +240,7 @@ def admin_users():
     """
     return {
         "users": [
-            {"id": u["id"], "username": u["username"], "email": u["email"], "ssn": u["ssn"]}
+            {"id": u["id"], "username": u.get("username"), "email": u.get("email"), "ssn": u.get("ssn")}
             for u in _USERS.values()
         ]
     }
@@ -259,14 +259,20 @@ def admin_stats(authorization: str = Header(default="")):
 def create_user(body: dict = Body(default={}), authorization: str = Header(default="")):
     """FLAW: mass assignment — arbitrary fields (role, is_admin) are stored."""
     token = authorization.removeprefix("Bearer ")
-    if not any(u["token"] == token for u in _USERS.values()):
+    if not any(u.get("token") == token for u in _USERS.values()):
         raise HTTPException(status_code=403, detail="forbidden")
     global _next_id
     uid = _next_id
     _next_id += 1
-    user = {"id": uid, "email": f"{body.get('username', 'anon')}@example.com"}
+    username = body.get("username", "anon")
+    user = {
+        "id": uid,
+        "username": username,
+        "email": f"{username}@example.com",
+        "ssn": f"XXX-XX-{1000 + uid}",
+        "token": f"tok_{uid}_secret",
+    }
     user.update(body)  # mass assignment: copies every supplied field, incl. role/is_admin
-    user.setdefault("username", "anon")
     _USERS[uid] = user
     return user
 

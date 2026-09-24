@@ -198,6 +198,20 @@
   summary { color:#0284c7; font-size:12px; font-weight:700; cursor:pointer; user-select:none; text-transform:uppercase; letter-spacing:.1em; }
   details pre { background:rgba(255,255,255,0.4); border-radius:12px; padding:16px; margin-top:12px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#334155; overflow-x:auto; border:1px solid rgba(255,255,255,0.5); }
 
+  .owasp-row { display:flex; align-items:center; gap:8px; margin:10px 0 4px; }
+  .owasp-tag { font-size:10px; font-weight:900; letter-spacing:.06em; color:#fff; background:linear-gradient(100deg,#0284c7,#7c3aed); padding:3px 10px; border-radius:999px; }
+  .owasp-row b { font-size:12px; color:#0f172a; }
+  .fix { font-size:12px; line-height:1.5; color:#334155; margin-bottom:12px; padding:10px 12px; background:rgba(2,132,199,0.08); border-radius:10px; border:1px solid rgba(2,132,199,0.2); }
+  .fix b { color:#0284c7; }
+
+  .grade-badge { display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:14px; background:linear-gradient(100deg, rgba(2,132,199,0.12), rgba(124,58,237,0.12)); border:1px solid rgba(2,132,199,0.3); margin-bottom:12px; }
+  .grade-letter { font-size:34px; font-weight:900; line-height:1; color:#0284c7; }
+  .grade-meta b { display:block; font-size:12px; color:#0f172a; }
+  .grade-meta span { font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:.08em; font-weight:700; }
+
+  .demo-btn { display:inline-flex; align-items:center; gap:6px; margin-top:8px; padding:8px 14px; font-size:11px; font-weight:800; letter-spacing:.04em; color:#0284c7; background:rgba(2,132,199,0.1); border:1px dashed rgba(2,132,199,0.5); border-radius:8px; cursor:pointer; transition:all .2s; }
+  .demo-btn:hover { background:rgba(2,132,199,0.2); border-style:solid; }
+
   .empty { display:none; text-align:center; padding:80px 20px; }
   .empty .ico { font-size:64px; color:var(--accent); animation:pulseGlow 2.5s infinite; filter:drop-shadow(0 0 20px rgba(0,210,255,.6)); }
   .empty b { font-size:28px; display:block; margin:16px 0 10px; font-weight:800; color:#f8fafc; }
@@ -429,6 +443,7 @@
         </div>
         <label class="field-label" style="margin-top:24px;" for="target">Target URL / Endpoint</label>
         <input type="text" id="target" placeholder="https://api.yourdomain.com" spellcheck="false"/>
+        <button class="demo-btn" id="demoBtn" type="button">⚡ Scan Demo Target (Sandbox)</button>
 
         <label class="consent-row">
           <input type="checkbox" id="consent"/>
@@ -456,6 +471,10 @@
       <!-- Top Right: Vulnerability Summary -->
       <section class="panel">
         <div class="sum-title">VULNERABILITY SUMMARY <span>•••</span></div>
+        <div class="grade-badge" id="gradeBadge">
+          <span class="grade-letter" id="gradeLetter">—</span>
+          <span class="grade-meta"><b id="gradeScore">No scans yet</b><span>Security Grade</span></span>
+        </div>
         <div class="sum-counts" id="summaryCounts">
           <div class="sc"><span class="sc-val cr">4</span><span class="sc-lbl">CRITICAL</span></div>
           <div class="sc"><span class="sc-val hi">12</span><span class="sc-lbl">HIGH</span></div>
@@ -1236,6 +1255,25 @@ const SEV = {
   LOW:      { cls: 'low',      color: '#00d2ff' }
 };
 
+// OWASP API Security Top 10 (2023) mapping + remediation guidance
+const OWASP = {
+  'Broken Object-Level Authorization (BOLA / IDOR)':
+    ['API1', 'Broken Object Level Authorization',
+     'Verify the requester owns the object on every request before returning or modifying it.'],
+  'Excessive Data Exposure':
+    ['API3', 'Excessive Data Exposure',
+     'Return only fields declared in the schema; never rely on the client to filter sensitive data.'],
+  'Broken Authentication':
+    ['API2', 'Broken Authentication',
+     'Enforce authentication on every protected endpoint — declaring it in the spec is not enough.'],
+  'Broken Function Level Authorization':
+    ['API5', 'Broken Function Level Authorization',
+     'Enforce role checks server-side on admin endpoints; never trust client-side roles.'],
+  'Mass Assignment':
+    ['API6', 'Mass Assignment',
+     'Whitelist allowed fields on create/update and reject or ignore unknown properties.']
+};
+
 function apiHeaders(json) {
   const h = {};
   if (json) h['Content-Type'] = 'application/json';
@@ -1267,6 +1305,14 @@ $('globalSearch').addEventListener('input', e => {
 
 $('scanBtn').addEventListener('click', startScan);
 $('target').addEventListener('keydown', e => { if (e.key === 'Enter') startScan(); });
+
+// One-click demo: prefill the local sandbox, consent, and run
+$('demoBtn').addEventListener('click', () => {
+  const host = location.hostname || '127.0.0.1';
+  $('target').value = 'http://' + host + ':8000';
+  $('consent').checked = true;
+  startScan();
+});
 
 // Sidebar navigation — scroll to real sections
 const NAV_TARGETS = {
@@ -1405,6 +1451,7 @@ function render(findings, target) {
     el.style.setProperty('--cc', s.color);
     el.style.animationDelay = (0.1 + i * 0.1) + 's';
     const ev = JSON.stringify(f.evidence || [], null, 2);
+    const ow = OWASP[f.title] || ['API', 'OWASP API Top 10', 'Review against the OWASP API Security Top 10 and apply the relevant control.'];
     el.innerHTML = `
       <div class="card-head">
         <span class="badge ${s.cls}">${esc(f.severity)}</span>
@@ -1412,6 +1459,8 @@ function render(findings, target) {
       </div>
       <div class="endpoint">${esc(f.endpoint)}</div>
       <p class="detail">${esc(f.detail)}</p>
+      <div class="owasp-row"><span class="owasp-tag">${esc(ow[0])}</span><b>${esc(ow[1])}</b></div>
+      <p class="fix">🛠 <b>Fix:</b> ${esc(ow[2])}</p>
       <div class="curl">${esc(f.reproduction)}</div>
       <details><summary>View Cryptographic Evidence</summary><pre>${esc(ev)}</pre></details>`;
     $('cards').appendChild(el);
@@ -1501,6 +1550,20 @@ function renderSummary(done) {
     `<div class="sc"><span class="sc-val hi">${agg.HIGH}</span><span class="sc-lbl">HIGH</span></div>` +
     `<div class="sc"><span class="sc-val md">${agg.MEDIUM}</span><span class="sc-lbl">MEDIUM</span></div>` +
     `<div class="sc"><span class="sc-val lo">${agg.LOW}</span><span class="sc-lbl">LOW</span></div>`;
+
+  // security grade badge — reflects the most recent completed scan
+  const latest = done[0];
+  const gl = $('gradeLetter'), gs = $('gradeScore');
+  if (!gl || !gs) return;
+  if (latest && latest.grade) {
+    const g = latest.grade.grade, sc = latest.grade.score;
+    gl.textContent = g;
+    gs.textContent = sc + '/100 — ' + ({A:'Excellent',B:'Good',C:'Fair',D:'Weak',F:'Critical'})[g];
+    gl.style.color = ({A:'#16a34a',B:'#2563eb',C:'#ca8a04',D:'#ea580c',F:'#e11d48'})[g] || '#0284c7';
+  } else {
+    gl.textContent = '—'; gs.textContent = 'No scans yet';
+    gl.style.color = '#0284c7';
+  }
 }
 
 function renderRecentDetections(done) {
@@ -1531,7 +1594,7 @@ function renderScanHistory(scans) {
       actions = `<span style="color:#94a3b8;">${esc(s.status)}</span>`;
     }
     return `<tr><td>${esc(s.target)}</td><td>${new Date(s.created_at * 1000).toLocaleDateString()}</td>` +
-      `<td>${s.status === 'done' ? (s.findings + ' findings') : esc(s.status)}</td>` +
+      `<td>${s.status === 'done' ? ((s.grade ? s.grade.grade + ' · ' : '') + s.findings + ' findings') : esc(s.status)}</td>` +
       `<td style="color:var(--accent);">${actions}</td></tr>`;
   }).join('');
   if (html) el.innerHTML = `<tr><th>Endpoint</th><th>Date</th><th>Duration</th><th>Action</th></tr>` + html;

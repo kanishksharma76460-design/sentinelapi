@@ -332,11 +332,13 @@ def scan_status(job_id: str, request: Request):
     if row is None:
         raise HTTPException(404, "scan not found")
     target, status, findings, error = row
+    fs = json.loads(findings) if findings else []
     return {
         "job_id": job_id,
         "target": target,
         "status": status,
-        "findings": json.loads(findings) if findings else [],
+        "findings": fs,
+        "grade": grade_of(fs),
         "error": error,
     }
 
@@ -401,6 +403,7 @@ def list_scans(request: Request):
             "created_at": created_at,
             "findings": len(fs),
             "counts": counts,
+            "grade": grade_of(fs),
             "sample": sample,
         })
     return {"scans": scans}
@@ -419,16 +422,63 @@ def _get_done_scan(job_id: str):
     return target, json.loads(findings) if findings else []
 
 
+# ---- security grade + OWASP mapping ----------------------------------------
+_GRADE_WEIGHT = {"CRITICAL": 20, "HIGH": 10, "MEDIUM": 5, "LOW": 2}
+
+
+def grade_of(findings: list) -> dict:
+    """SSL-Labs-style letter grade + 0-100 score from finding severities."""
+    score = 100
+    for f in findings:
+        score -= _GRADE_WEIGHT.get(f.get("severity", "LOW"), 2)
+    score = max(0, min(100, score))
+    if score >= 90:
+        grade = "A"
+    elif score >= 80:
+        grade = "B"
+    elif score >= 70:
+        grade = "C"
+    elif score >= 60:
+        grade = "D"
+    else:
+        grade = "F"
+    return {"grade": grade, "score": score}
+
+
+def owasp_of(title: str) -> tuple[str, str]:
+    """Map a finding title to its OWASP API Security Top 10 (2023) category."""
+    t = title.lower()
+    if "object-level" in t or "bola" in t or "idor" in t:
+        return ("API1 — Broken Object Level Authorization",
+                "Verify the requester owns the object on every request before returning or modifying it.")
+    if "excessive data exposure" in t or "data exposure" in t:
+        return ("API3 — Excessive Data Exposure",
+                "Return only fields declared in the schema; never rely on the client to filter sensitive data.")
+    if "authentication" in t:
+        return ("API2 — Broken Authentication",
+                "Enforce authentication on every protected endpoint — declaring it in the spec is not enough.")
+    if "function" in t or "bfla" in t:
+        return ("API5 — Broken Function Level Authorization",
+                "Enforce role checks server-side on admin endpoints; never trust client-side roles.")
+    if "mass assignment" in t:
+        return ("API6 — Mass Assignment",
+                "Whitelist allowed fields on create/update and reject or ignore unknown properties.")
+    return ("OWASP API Top 10",
+            "Review the finding against the OWASP API Security Top 10 and apply the relevant control.")
+
+
 # ---- report rendering ------------------------------------------------------
 _SEV_COLORS = {"CRITICAL": "#f43f5e", "HIGH": "#fb923c",
                "MEDIUM": "#facc15", "LOW": "#60a5fa"}
 
 
 def _render_report_html(target: str, findings: list) -> str:
+    g = grade_of(findings)
     cards = []
     for f in findings:
         sev = f.get("severity", "LOW")
         color = _SEV_COLORS.get(sev, "#8b96ad")
+        owasp, fix = owasp_of(f.get("title", ""))
         cards.append(
             f'<div style="background:#161b22;border:1px solid #30363d;'
             f'border-radius:12px;padding:16px;margin:12px 0;">'
@@ -437,6 +487,8 @@ def _render_report_html(target: str, findings: list) -> str:
             f'<b>{f.get("title", "")}</b><br/>'
             f'<code style="color:#79c0ff;font-size:13px;">{f.get("endpoint", "")}</code>'
             f'<p style="color:#c9d1d9;font-size:13px;">{f.get("detail", "")}</p>'
+            f'<p style="color:#d29922;font-size:12px;margin:6px 0;"><b>🛡 {owasp}</b><br/>'
+            f'<span style="color:#8b96ad;">Fix: {fix}</span></p>'
             f'<pre style="background:#0d1117;padding:10px;border-radius:8px;'
             f'color:#7ee787;font-size:12px;overflow-x:auto;">'
             f'{f.get("reproduction", "")}</pre></div>')
@@ -447,8 +499,15 @@ def _render_report_html(target: str, findings: list) -> str:
         '<body style="background:#0d1117;color:#e6edf3;font-family:system-ui,'
         'sans-serif;padding:32px;max-width:820px;margin:0 auto;">'
         f'<h1 style="font-size:22px;">Security Scan Report</h1>'
-        f'<p style="color:#8b96ad;">Target: {target} · {len(findings)} finding(s)</p>'
+        f'<p style="color:#8b96ad;">Target: {target} · {len(findings)} finding(s) · '
+        f'Security Grade: <b style="color:{_grade_color(g["grade"])};font-size:20px;">{g["grade"]}</b> '
+        f'({g["score"]}/100)</p>'
         f'{body}</body></html>')
+
+
+def _grade_color(grade: str) -> str:
+    return {"A": "#3fb950", "B": "#58a6ff", "C": "#d29922",
+            "D": "#db6d28", "F": "#f85149"}.get(grade, "#8b96ad")
 
 
 def _render_report_pdf(target: str, findings: list) -> bytes:
@@ -463,9 +522,12 @@ def _render_report_pdf(target: str, findings: list) -> bytes:
                             rightMargin=48, leftMargin=48,
                             topMargin=48, bottomMargin=48)
     styles = getSampleStyleSheet()
+    g = grade_of(findings)
     story = [
         Paragraph("Security Scan Report", styles["Title"]),
-        Paragraph(f"Target: {target} — {len(findings)} finding(s)",
+        Paragraph(f"Target: {target} — {len(findings)} finding(s) — "
+                  f'Security Grade: <b><font color="{_grade_color(g["grade"])}">{g["grade"]}</font></b> '
+                  f'({g["score"]}/100)',
                   styles["Normal"]),
         Spacer(1, 20),
     ]
@@ -476,11 +538,13 @@ def _render_report_pdf(target: str, findings: list) -> bytes:
         color = getattr(colors, {
             "CRITICAL": "red", "HIGH": "orange",
             "MEDIUM": "gold", "LOW": "skyblue"}.get(sev, "grey"))
+        owasp, fix = owasp_of(f.get("title", ""))
         story.append(Table(
             [[Paragraph(f'<b>[{sev}] {f.get("title", "")}</b>',
                         styles["Heading3"])],
              [Paragraph(f.get("endpoint", ""), styles["Code"])],
              [Paragraph(f.get("detail", ""), styles["Normal"])],
+             [Paragraph(f"<b>{owasp}</b> — {fix}", styles["Normal"])],
              [Paragraph(f.get("reproduction", ""), styles["Code"])]],
             colWidths=[doc.width],
             style=TableStyle([
