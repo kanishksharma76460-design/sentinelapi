@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Globe from './components/Globe.jsx'
 import AttackGraph from './components/AttackGraph.jsx'
+import Eye from './components/Eye.jsx'
 import {
   ALL_CHECKS, DEMO_TARGET, OWASP, SEV,
   startScan, getScan, listScans, cancelScan, deleteScan, reportUrl
@@ -50,9 +51,11 @@ export default function App() {
   const [grade, setGrade] = useState(null)
   const [history, setHistory] = useState([])
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('sentinel_api_key') || '')
+  const [booted, setBooted] = useState(false)
   const termRef = useRef(null)
 
   useEffect(() => { loadHistory() }, [])
+  useEffect(() => { const t = setTimeout(() => setBooted(true), 2200); return () => clearTimeout(t) }, [])
   useEffect(() => {
     if (termRef.current) termRef.current.scrollTop = termRef.current.scrollHeight
   }, [logs])
@@ -155,6 +158,13 @@ export default function App() {
 
   return (
     <div className="app">
+      {!booted && (
+        <div className="boot" onClick={() => setBooted(true)}>
+          <div className="boot-text">AEGIS SYSTEM // INITIALIZING</div>
+          <div className="boot-bar"><i /></div>
+        </div>
+      )}
+
       {/* ── Nav ── */}
       <nav className="nav">
         <div className="logo">
@@ -180,8 +190,8 @@ export default function App() {
       <section className="hero" id="scan">
         <Globe />
         <div className="hero-copy">
-          <span className="eyebrow"><span className="dot" /> Zero-trust API security</span>
-          <h1>Find what your API <span className="grad">leaks.</span></h1>
+          <span className="eyebrow"><span className="dot" /> AEGIS SYSTEM // ONLINE</span>
+          <h1>Find what your API <span className="accent">leaks.</span></h1>
           <p>
             Athera Secure scans any API for broken access control, leaked data and
             weak authentication — eight vulnerability classes, graded A–F, with
@@ -223,6 +233,9 @@ export default function App() {
             {error && <div className="error">{error}</div>}
           </div>
         </div>
+        <div className="eye-hero">
+          <Eye scanning={scanning} done={!!findings} grade={grade} />
+        </div>
       </section>
 
       {/* ── Terminal ── */}
@@ -246,6 +259,9 @@ export default function App() {
       {findings && (
         <section className="section" id="results">
           <div className="panel result-hero">
+            <div className={'stamp' + (grade && grade.grade !== 'A' ? ' threat' : '')}>
+              {grade && grade.grade === 'A' ? 'ACCESS GRANTED' : 'ANALYSIS COMPLETE'}
+            </div>
             {grade && (
               <div className="grade">
                 <div className="letter">{grade.grade}</div>
