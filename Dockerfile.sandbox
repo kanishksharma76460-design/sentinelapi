@@ -1,0 +1,14 @@
+# Sandbox service — the deliberately vulnerable target, deployed so the
+# product can scan it live (its public Railway URL is a valid scan target).
+FROM python:3.13-slim
+WORKDIR /app
+
+COPY backend/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+COPY vuln_api/ /app/vuln_api/
+COPY vuln_api2/ /app/vuln_api2/
+
+ENV PORT=8000
+EXPOSE 8000
+CMD ["sh", "-c", "uvicorn vuln_api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

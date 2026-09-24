@@ -201,8 +201,10 @@ backend/
 │                         #   runs engine/sentinel-engine as a subprocess
 ├── requirements.txt      # fastapi + uvicorn
 └── static/index.html     # single-page scan UI (vanilla JS, dark theme)
-Dockerfile                # multi-stage: build Go engine → Python runtime
+Dockerfile                # multi-stage: build Go engine → Python runtime (product)
+Dockerfile.sandbox        # deploys the vulnerable target as a second Railway service
 railway.toml              # Railway deploy config (Dockerfile builder)
+DEPLOY.md                 # step-by-step Railway deployment guide
 .dockerignore
 ```
 
@@ -225,19 +227,22 @@ ALLOW_PRIVATE_SCAN=1 .venv/bin/python -m uvicorn backend.main:app --port 8080  #
 
 ## 🎯 Accuracy (verified)
 
-`tests/accuracy.py` runs the engine against the sandbox and compares against ground
-truth — including a **secure control endpoint** (`/posts/{id}`) that must produce
-**zero** findings.
+`tests/accuracy.py` is a **benchmark harness** over a corpus of two deliberately
+vulnerable sandbox APIs (Bank + Library) with secure control endpoints that must
+produce **zero** findings.
 
 | Metric | Go engine | Python engine |
 |---|---|---|
-| True positives | 19/19 | 19/19 |
+| Targets | 2 (bank + library) | 2 |
+| True positives | 24/24 | 24/24 |
 | False positives | 0 | 0 |
 | False negatives | 0 | 0 |
-| Secure-endpoint findings | 0 | 0 |
 | **Precision / Recall / F1** | **1.0 / 1.0 / 1.0** | **1.0 / 1.0 / 1.0** |
 
 Run it: `python tests/accuracy.py` (and `ENGINE=python python tests/accuracy.py`).
+The second target (`vuln_api2`, different identifiers `book_id`/`member_id`) proves
+the scanner **generalises** — identifiers are inferred from the register response,
+not hardcoded.
 
 `tests/e2e_backend.py` additionally verifies the hosted backend: health, consent
 enforcement, SSRF blocking, and a full scan returning the 19 findings.

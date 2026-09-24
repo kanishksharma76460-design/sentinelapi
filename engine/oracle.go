@@ -2,13 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 )
-
-// identifierFields are the fields returned by /register that identify a
-// principal. Order matters: it is the substitution and detection order.
-var identifierFields = []string{"id", "username", "email", "order_id", "post_id"}
 
 // sensitiveHints name patterns whose presence in a response is a plausible leak.
 var sensitiveHints = []string{
@@ -23,14 +20,30 @@ type marker struct {
 	Str string
 }
 
+// markersFromUser infers a principal's identifying fields generically from the
+// registration response (any scalar field), instead of hardcoding field names —
+// so the scanner works against any API with a register endpoint.
 func markersFromUser(u map[string]interface{}) []marker {
+	keys := make([]string, 0, len(u))
+	for k := range u {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	var out []marker
-	for _, k := range identifierFields {
-		if v, ok := u[k]; ok {
+	for _, k := range keys {
+		if v, ok := u[k]; ok && isScalar(v) {
 			out = append(out, marker{Key: k, Raw: v, Str: stringify(v)})
 		}
 	}
 	return out
+}
+
+func isScalar(v interface{}) bool {
+	switch v.(type) {
+	case map[string]interface{}, []interface{}:
+		return false
+	}
+	return true
 }
 
 func stringify(v interface{}) string {

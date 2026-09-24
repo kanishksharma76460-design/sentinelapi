@@ -38,9 +38,16 @@ SENSITIVE_HINTS = (
     "pan", "key", "otp", "aadhaar", "pan_number",
 )
 
-# marker fields returned by /register that identify a principal (used as the
-# oracle for "is this B's data?")
+# marker fields returned by /register that identify a principal. The scanner now
+# infers them GENERICALLY from the register response; this tuple is no longer used
+# for detection and is kept only for documentation.
 IDENTIFIER_FIELDS = ("id", "username", "email", "order_id", "post_id")
+
+
+def scalar_markers(user: dict) -> dict:
+    """Infer a principal's identifying fields generically (any scalar field)."""
+    return {k: v for k, v in sorted(user.items())
+            if isinstance(v, (int, str, float, bool))}
 
 
 @dataclass
@@ -209,7 +216,7 @@ def check_bola(client, base, endpoint, user_a, user_b, seen) -> list[Finding]:
     if len(params) != 1:
         return findings
 
-    b_markers = {k: user_b[k] for k in IDENTIFIER_FIELDS if k in user_b}
+    b_markers = scalar_markers(user_b)
     for marker_key, marker_val in b_markers.items():
         filled = path.replace("{" + params[0] + "}", str(marker_val))
         try:
@@ -454,9 +461,7 @@ def main() -> int:
         method, path, _op = ep
         params = path_params(path)
         if len(params) == 1:
-            for k in IDENTIFIER_FIELDS:
-                if k not in user_a:
-                    continue
+            for k, _v in scalar_markers(user_a).items():
                 cand = path.replace("{" + params[0] + "}", str(user_a[k]))
                 try:
                     status, body = do_request(client, method, base + cand, a_token)

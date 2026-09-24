@@ -33,7 +33,7 @@ from pydantic import BaseModel
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = Path(__file__).resolve().parent / "static"
 ENGINE_BIN = ROOT / "engine" / "sentinel-engine"
-DB_PATH = ROOT / "scans.db"
+DB_PATH = Path(os.environ.get("DB_PATH", str(ROOT / "scans.db")))
 ALLOW_PRIVATE = os.environ.get("ALLOW_PRIVATE_SCAN", "0") == "1"
 
 app = FastAPI(title="SentinelAPI", version="1.0.0")
