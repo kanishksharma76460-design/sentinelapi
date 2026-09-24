@@ -251,6 +251,20 @@
   .dashboard-layout .trust-pill { background: rgba(255,255,255,0.5); border: 1px solid rgba(2,132,199,0.3); color: #0284c7; font-weight: 900; }
   
   .dynamic-results { margin-top: 40px; }
+
+  /* ── Responsive / mobile ── */
+  @media (max-width: 900px) {
+    .dashboard-layout { flex-direction: column; height: auto; overflow: visible; }
+    .sidebar { width: 100%; flex-direction: row; flex-wrap: wrap; align-items: center;
+               gap: 8px; padding: 12px 14px; }
+    .sidebar .logo-container { margin-bottom: 0; }
+    .sidebar .logo { font-size: 26px; }
+    .sidebar nav { display: flex; flex-wrap: wrap; gap: 4px; }
+    .sidebar nav a { padding: 8px 10px; font-size: 11px; margin-bottom: 0; }
+    .main-content { padding: 16px; }
+    .dashboard-grid { grid-template-columns: 1fr; gap: 16px; }
+    .table-panel { overflow-x: auto; }
+  }
 </style>
 </head>
 <body>
@@ -393,10 +407,14 @@
   </div>
 </div>
 
-<!-- Three.js loaded as a classic UMD script (no module/importmap complexity) -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<!-- Three.js as an ES module via import map (avoids the deprecated UMD build) -->
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
+</script>
 
-<script>
+<script type="module">
+import * as THREE from 'three';
+
 /* ============================================================
    GLOBE – pure Three.js, no external Globe lib needed
    Earth textures sourced from NASA Blue Marble / CGDI CDN
@@ -436,11 +454,12 @@
 
   // ── Load Earth Night Map + Cloud Layer ──
   // Night-side city lights map (from existing three.js examples on unpkg)
-  const earthNightTex  = loader.load('https://unpkg.com/three-globe/example/img/earth-night.jpg');
-  const earthDayTex    = loader.load('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg');
-  const bumpTex        = loader.load('https://unpkg.com/three-globe/example/img/earth-topology.png');
-  const cloudTex       = loader.load('https://unpkg.com/three-globe/example/img/earth-clouds.png');
-  const specularTex    = loader.load('https://unpkg.com/three-globe/example/img/earth-water.png');
+  const texBase = 'https://cdn.jsdelivr.net/npm/three-globe@2.45.2/example/img/';
+  const earthNightTex  = loader.load(texBase + 'earth-night.jpg');
+  const earthDayTex    = loader.load(texBase + 'earth-blue-marble.jpg');
+  const bumpTex        = loader.load(texBase + 'earth-topology.png');
+  const cloudTex       = loader.load(texBase + 'clouds.png');
+  const specularTex    = loader.load(texBase + 'earth-water.png');
 
   // ── Earth sphere ──
   const earthGeo = new THREE.SphereGeometry(1, 128, 128); // Ultra HD segments
@@ -1106,6 +1125,24 @@ const SEV = {
 $('scanBtn').addEventListener('click', startScan);
 $('target').addEventListener('keydown', e => { if (e.key === 'Enter') startScan(); });
 
+// Sidebar navigation — scroll to real sections
+const NAV_TARGETS = {
+  '◷ Recent Scans': 'scanHistory',
+  '⛨ Threat Intel': 'recentDetections',
+  '📊 Reporting': 'cards',
+  '⚙ Preview': 'stats'
+};
+document.querySelectorAll('.sidebar nav a').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    const id = NAV_TARGETS[a.textContent.trim()];
+    if (id && $(id)) { $(id).scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    else { document.querySelector('.main-content').scrollTo({ top: 0, behavior: 'smooth' }); }
+    document.querySelectorAll('.sidebar nav a').forEach(x => x.classList.remove('active'));
+    a.classList.add('active');
+  });
+});
+
 async function startScan() {
   const target  = $('target').value.trim();
   const consent = $('consent').checked;
@@ -1255,6 +1292,7 @@ function downloadCert() {
   if (latestJobId) { window.location.href = '/api/scan/' + latestJobId + '/report'; return; }
   alert('Run a scan first to generate your security report badge.');
 }
+window.downloadCert = downloadCert; // expose for the inline onclick (module scope)
 
 /* ============================================================
    REAL DASHBOARD DATA (wired to /api/scans)
