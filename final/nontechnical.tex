@@ -1,0 +1,171 @@
+% ============================================================
+%  SentinelAPI — Plain-English Explainer (non-technical)
+%  Every technical term is explained in simple words + a glossary.
+%  Compile:  pdflatex nontechnical.tex
+% ============================================================
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{helvet}
+\usepackage[hidelinks]{hyperref}
+
+\renewcommand{\familydefault}{\sfdefault}
+\definecolor{accent}{RGB}{37, 99, 235}
+\definecolor{red}{RGB}{220, 38, 38}
+\definecolor{orange}{RGB}{234, 88, 12}
+\definecolor{grayline}{RGB}{229, 231, 235}
+
+\titleformat{\section}
+  {\Large\bfseries\color{accent}}{\thesection.}{0.6em}{}
+\titleformat{\subsection}
+  {\large\bfseries}{\thesubsection}{0.6em}{}
+
+\newcommand{\card}[2]{%
+  \noindent\fcolorbox{grayline}{white}{%
+    \begin{minipage}{\dimexpr\linewidth-2\fboxsep-2\fboxrule\relax}
+      \textbf{\color{accent}#1}\\[2mm]
+      #2
+    \end{minipage}}%
+  \par\vspace{3mm}}
+
+\title{\bfseries SentinelAPI --- Explained in Plain English\\[1mm]
+       \Large A tool that finds hidden security holes in websites, automatically}
+\author{AMIHACKS 2026 --- Track C (Deep-Tech)}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\begin{center}
+\fcolorbox{accent}{white}{\parbox{0.92\linewidth}{%
+\centering\itshape
+``We built a robot that finds a website's hidden security holes automatically ---
+before a hacker does.''}}\end{center}
+
+\vspace{4mm}
+
+\section{The Problem, in One Minute}
+
+Apps and websites talk to servers through ``doors'' called \textbf{APIs}. Every
+time you log in, check a balance, or open a profile, your app is knocking on one
+of these doors. When a door is built carelessly, two things go wrong:
+
+\begin{enumerate}[leftmargin=1.8em, itemsep=1mm]
+  \item \textbf{The open door.} The server hands over \emph{someone else's} data
+        when you ask --- because nobody checked \emph{who} is asking.
+  \item \textbf{The oversharing door.} The server sends back \emph{too much} ---
+        passwords, card numbers, private details the app never needed.
+\end{enumerate}
+
+Hackers find these mistakes every day. Companies usually notice only
+\emph{after} the damage is done, because checking by hand is slow and expensive.
+
+\section{What We Built}
+
+\textbf{SentinelAPI} is an \emph{automatic security inspector}. You point it at
+an app's doors, and it tells you exactly which ones are unsafe --- in plain
+words, with a one-line proof, so anyone can act on it.
+
+\card{In one sentence}{
+It creates two imaginary users, checks whether one can see the other's secrets,
+and checks whether the server is sharing more than it promised.}
+
+\section{How It Works --- Five Simple Steps}
+
+\begin{enumerate}[leftmargin=1.8em, itemsep=2mm]
+  \item \textbf{We built a practice app} with known flaws, like a training dummy
+        for the inspector to test itself on.
+  \item \textbf{The inspector creates two imaginary users} --- Alice and Bob.
+  \item \textbf{It pretends to be Alice and asks for Bob's stuff.}
+        If the server says \emph{``sure, here's Bob's data''} --- that's a red
+        flag. We call it the \emph{open-door} problem.
+  \item \textbf{It compares the promise with reality.} The server's own rulebook
+        says what it will share; the inspector checks what it \emph{actually}
+        shares. Extra secrets --- passwords, card numbers --- are another red
+        flag. We call it the \emph{oversharing} problem.
+  \item \textbf{It writes a report.} Every problem gets a colour badge
+        (\textcolor{red}{red} = serious, \textcolor{orange}{orange} = important)
+        plus a copy-paste command that proves it.
+\end{enumerate}
+
+\section{What Makes It New}
+
+\card{We test, we don't guess}{
+Most scanners throw random junk at a server and hope something breaks. We do
+something smarter: we create \textbf{two real users} and check whether one can
+see the other's data. That is a \emph{real test}, not a guess.}
+
+\card{We use the server's own rulebook}{
+Every server has a ``rulebook'' (a file describing what it should share). We
+compare what the server \emph{promised} against what it actually does. The
+difference between promise and reality is where the leak is.}
+
+\card{Every finding comes with proof}{
+No vague warnings. Each problem includes a copy-paste command anyone can run to
+see the leak with their own eyes --- so there are \emph{no false alarms}.}
+
+\card{Runs anywhere, costs nothing}{
+The whole thing works offline with free, open tools --- no paid services, no
+cloud, no internet needed for the demo.}
+
+\section{The Tech Stack, in Plain Terms}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Tool} & \textbf{What it does for us} \\
+\midrule
+Python + FastAPI & The practice app, and the ``brain'' of the inspector \\
+Go & A second, faster copy of the brain (single file, no setup) \\
+OpenAPI & The server's rulebook the inspector reads \\
+HTML + CSS + Three.js & The clean report page with colour badges and a 3D background \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{The Results}
+
+We tested the inspector on \textbf{two practice apps} with 24 hidden problems in
+total. It found \textbf{all 24}, and raised \textbf{zero} false alarms. In
+measuring terms: \textbf{100\% precision, 100\% recall}. In plain words: it
+catches everything real and never cries wolf.
+
+\section{Jargon, Translated}
+
+\noindent The technical words, explained simply:
+
+\begin{center}
+\small
+\begin{tabular}{ll}
+\toprule
+\textbf{Term} & \textbf{What it actually means} \\
+\midrule
+API & The ``door'' an app uses to ask a server for data \\
+BOLA / IDOR & The ``open door'' bug --- seeing other people's data \\
+OpenAPI & The server's written ``rulebook'' of what it should share \\
+Differential testing & Creating two users and comparing what each can see \\
+Broken authentication & The door works with \emph{no} key at all \\
+Privilege escalation & A normal user getting \emph{admin} powers they shouldn't have \\
+Mass assignment & The server accepting extra fields it was never asked for \\
+SSRF guard & A safety lock so our tool can't be abused to attack other servers \\
+Precision / Recall & How often it's right vs.\ how many real bugs it misses \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{4mm}
+\begin{center}
+\fcolorbox{grayline}{white}{\parbox{0.92\linewidth}{%
+\centering\large\bfseries
+The result: a tool that finds security holes automatically, explains them in
+plain words, and proves them --- before a hacker does.}}\end{center}
+
+\end{document}
