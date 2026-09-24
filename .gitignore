@@ -23,7 +23,6 @@ scanner/report.html
 
 # Docs & papers (kept local, not on GitHub)
 *.pdf
-!backend/static/*.pdf
 *.tex
 final/
 research/
