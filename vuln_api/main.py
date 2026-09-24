@@ -33,6 +33,13 @@ app = FastAPI(
     version="1.0.0",
 )
 
+
+@app.middleware("http")
+async def _leak_server_header(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Powered-By"] = "SentinelBank/1.0"
+    return response
+
 # ---------------------------------------------------------------------------
 # In-memory "database"
 # ---------------------------------------------------------------------------
@@ -275,6 +282,18 @@ def create_user(body: dict = Body(default={}), authorization: str = Header(defau
     user.update(body)  # mass assignment: copies every supplied field, incl. role/is_admin
     _USERS[uid] = user
     return user
+
+
+@app.get("/debug", include_in_schema=False)
+def debug_info():
+    """FLAW: exposed debug endpoint (improper inventory) — leaks internal config."""
+    return {
+        "debug": True,
+        "environment": "production",
+        "app_version": "1.0.0",
+        "secret_key": "sk_live_9f8e7d6c5b4a3210",
+        "config": {"db_host": "internal-db:5432", "debug_mode": True},
+    }
 
 
 @app.get("/health")

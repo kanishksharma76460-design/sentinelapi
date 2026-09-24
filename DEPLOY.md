@@ -85,5 +85,5 @@ docker build -f Dockerfile.sandbox -t sentinelapi-sandbox .
 | `GET` | `/api/health` | Liveness + version |
 
 `checks` accepts any subset of `bola`, `mass-assignment`, `bfla`, `exposure`,
-`missing-auth` (omit for all). `webhook_url` receives a POST with the findings
-on completion.
+`missing-auth`, `security-misconfig`, `rate-limit`, `debug-endpoints` (omit for
+all). `webhook_url` receives a POST with the findings on completion.

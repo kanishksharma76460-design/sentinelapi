@@ -121,12 +121,12 @@ def main() -> int:
                 print("scan error:", st["error"])
                 return 1
         print("findings:", len(findings))
-        assert len(findings) == 19, f"expected 19 findings, got {len(findings)}"
+        assert len(findings) == 22, f"expected 22 findings, got {len(findings)}"
 
         # 5. JSON report download
         s, body = request("GET", BK_BASE + f"/api/scan/{job_id}/report.json")
         assert s == 200, body
-        assert len(body.get("findings", [])) == 19, "JSON report findings mismatch"
+        assert len(body.get("findings", [])) == 22, "JSON report findings mismatch"
 
         # 6. PDF report download
         req = urllib.request.Request(
@@ -149,7 +149,7 @@ def main() -> int:
         s, _ = request("GET", BK_BASE + f"/api/scan/{job_id}")
         assert s == 404, "deleted scan still fetchable"
 
-        print("RESULT: PASS ✅  (health, consent, SSRF, 19 findings, "
+        print("RESULT: PASS ✅  (health, consent, SSRF, 22 findings, "
               "JSON+PDF reports, check validation, delete)")
         return 0
     finally:

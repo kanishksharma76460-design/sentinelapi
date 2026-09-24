@@ -32,6 +32,13 @@ app = FastAPI(
     version="1.0.0",
 )
 
+
+@app.middleware("http")
+async def _leak_server_header(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Powered-By"] = "LibraryService/2.4"
+    return response
+
 _USERS: dict[int, dict] = {}
 _BOOKS: dict[int, dict] = {}
 _MEMBERS: dict[int, dict] = {}
@@ -115,6 +122,18 @@ def member_profile(member_id: int, authorization: str = Header(default="")):
                 raise HTTPException(status_code=403, detail="forbidden")
             return {"member": {"name": m["name"], "library_card": m["library_card"]}}
     raise HTTPException(status_code=404, detail="member not found")
+
+
+@app.get("/debug", include_in_schema=False)
+def debug_info():
+    """FLAW: exposed debug endpoint (improper inventory) — leaks internal config."""
+    return {
+        "debug": True,
+        "environment": "production",
+        "app_version": "2.4.0",
+        "secret_key": "lib_secret_0123456789abcdef",
+        "config": {"db_host": "library-db:5432", "debug_mode": True},
+    }
 
 
 @app.get("/health")

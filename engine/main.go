@@ -10,11 +10,14 @@ import (
 // checkNames is the set of selectable scan checks (also used to validate
 // the --checks flag). "all" enables every check.
 var checkNames = map[string]bool{
-	"bola":           true,
-	"mass-assignment": true,
-	"bfla":           true,
-	"exposure":       true,
-	"missing-auth":   true,
+	"bola":                true,
+	"mass-assignment":     true,
+	"bfla":                true,
+	"exposure":            true,
+	"missing-auth":        true,
+	"security-misconfig":  true,
+	"rate-limit":          true,
+	"debug-endpoints":     true,
 }
 
 func parseChecks(s string) (map[string]bool, error) {
@@ -32,7 +35,7 @@ func parseChecks(s string) (map[string]bool, error) {
 			continue
 		}
 		if !checkNames[p] {
-			return nil, fmt.Errorf("unknown check %q (valid: bola, mass-assignment, bfla, exposure, missing-auth)", p)
+			return nil, fmt.Errorf("unknown check %q (valid: bola, mass-assignment, bfla, exposure, missing-auth, security-misconfig, rate-limit, debug-endpoints)", p)
 		}
 		result[p] = true
 	}

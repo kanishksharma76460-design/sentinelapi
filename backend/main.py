@@ -65,7 +65,8 @@ SCAN_TIMEOUT = int(os.environ.get("SCAN_TIMEOUT_SECONDS", "120"))
 CORS_ORIGINS = [o.strip() for o in os.environ.get(
     "CORS_ORIGINS", "*").split(",") if o.strip()]
 
-VALID_CHECKS = {"bola", "mass-assignment", "bfla", "exposure", "missing-auth"}
+VALID_CHECKS = {"bola", "mass-assignment", "bfla", "exposure", "missing-auth",
+                "security-misconfig", "rate-limit", "debug-endpoints"}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -463,6 +464,15 @@ def owasp_of(title: str) -> tuple[str, str]:
     if "mass assignment" in t:
         return ("API6 — Mass Assignment",
                 "Whitelist allowed fields on create/update and reject or ignore unknown properties.")
+    if "security misconfiguration" in t:
+        return ("API8 — Security Misconfiguration",
+                "Remove server-version headers and add X-Content-Type-Options, X-Frame-Options and HSTS.")
+    if "rate limit" in t:
+        return ("API4 — Unrestricted Resource Consumption",
+                "Add rate limiting (429 + Retry-After) per client on every endpoint.")
+    if "debug endpoint" in t:
+        return ("API9 — Improper Inventory Management",
+                "Remove or lock down debug/staging endpoints in production.")
     return ("OWASP API Top 10",
             "Review the finding against the OWASP API Security Top 10 and apply the relevant control.")
 

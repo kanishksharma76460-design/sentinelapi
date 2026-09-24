@@ -42,6 +42,9 @@ BANK_TRUTH = {
     ("HIGH", "Broken Authentication", "GET /admin/users", None),
     ("HIGH", "Broken Function Level Authorization", "GET /admin/users", None),
     ("HIGH", "Mass Assignment", "POST /users", None),
+    ("LOW", "Security Misconfiguration", "ALL", None),
+    ("MEDIUM", "Missing Rate Limiting", "ALL", None),
+    ("HIGH", "Exposed Debug Endpoint", "GET /debug", None),
 }
 
 LIBRARY_TRUTH = {
@@ -50,6 +53,9 @@ LIBRARY_TRUTH = {
     ("HIGH", "Broken Authentication", "GET /books/{book_id}", None),
     ("HIGH", "Broken Authentication", "GET /members", None),
     ("HIGH", "Excessive Data Exposure", "GET /members/{member_id}/profile", "member.library_card"),
+    ("LOW", "Security Misconfiguration", "ALL", None),
+    ("MEDIUM", "Missing Rate Limiting", "ALL", None),
+    ("HIGH", "Exposed Debug Endpoint", "GET /debug", None),
 }
 
 TARGETS = [

@@ -91,6 +91,17 @@ func runWithChecks(base, outJSON, outHTML string, checks map[string]bool) error 
 		}
 	}
 
+	// API-wide checks (run once per scan, not per endpoint).
+	if checks["security-misconfig"] {
+		findings = append(findings, checkSecurityMisconfig(client, base)...)
+	}
+	if checks["rate-limit"] {
+		findings = append(findings, checkRateLimit(client, base)...)
+	}
+	if checks["debug-endpoints"] {
+		findings = append(findings, checkDebugEndpoints(client, base)...)
+	}
+
 	sort.SliceStable(findings, func(i, j int) bool {
 		return severityOrder[findings[i].Severity] < severityOrder[findings[j].Severity]
 	})
@@ -392,5 +403,136 @@ func sortedKeys(m map[string]bool) []string {
 		out = append(out, k)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// checkSecurityMisconfig flags version disclosure in response headers and
+// missing hardening headers (OWASP API7/API8 — Security Misconfiguration).
+func checkSecurityMisconfig(client *http.Client, base string) []finding {
+	resp, err := client.Get(base + "/")
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	var leaks []string
+	for _, h := range []string{"X-Powered-By", "X-AspNet-Version", "X-Runtime",
+		"X-Generator", "X-Runtime-Platform"} {
+		if v := resp.Header.Get(h); v != "" {
+			leaks = append(leaks, h+": "+v)
+		}
+	}
+	if sv := resp.Header.Get("Server"); sv != "" && !strings.EqualFold(sv, "uvicorn") {
+		leaks = append(leaks, "Server: "+sv)
+	}
+
+	var missing []string
+	if resp.Header.Get("X-Content-Type-Options") == "" {
+		missing = append(missing, "X-Content-Type-Options")
+	}
+	if resp.Header.Get("X-Frame-Options") == "" &&
+		resp.Header.Get("Content-Security-Policy") == "" {
+		missing = append(missing, "X-Frame-Options")
+	}
+	if resp.Header.Get("Strict-Transport-Security") == "" {
+		missing = append(missing, "Strict-Transport-Security")
+	}
+
+	if len(leaks) == 0 && len(missing) == 0 {
+		return nil
+	}
+	detail := ""
+	if len(leaks) > 0 {
+		detail += "Leaks server software/version in response headers: " +
+			strings.Join(leaks, ", ") + ". "
+	}
+	if len(missing) > 0 {
+		detail += "Missing hardening headers: " + strings.Join(missing, ", ") + "."
+	}
+	return []finding{{
+		Severity:     "LOW",
+		Title:        "Security Misconfiguration",
+		Endpoint:     "ALL",
+		Detail:       detail,
+		Reproduction: fmt.Sprintf("curl -sI %s/", base),
+		Evidence: []map[string]interface{}{{
+			"headers_leaked":  leaks,
+			"headers_missing": missing,
+		}},
+	}}
+}
+
+// checkRateLimit floods a cheap endpoint and flags the absence of any 429 /
+// Retry-After response (OWASP API4 — Unrestricted Resource Consumption).
+func checkRateLimit(client *http.Client, base string) []finding {
+	const n = 15
+	for i := 0; i < n; i++ {
+		resp, err := client.Get(base + "/health")
+		if err != nil {
+			continue
+		}
+		limited := resp.StatusCode == http.StatusTooManyRequests ||
+			resp.Header.Get("Retry-After") != ""
+		resp.Body.Close()
+		if limited {
+			return nil
+		}
+	}
+	return []finding{{
+		Severity: "MEDIUM",
+		Title:    "Missing Rate Limiting",
+		Endpoint: "ALL",
+		Detail: fmt.Sprintf(
+			"Sent %d rapid requests with no 429/Retry-After response — the API has no rate limiting (OWASP API4: Unrestricted Resource Consumption).",
+			n),
+		Reproduction: fmt.Sprintf(
+			"for i in $(seq 1 %d); do curl -s -o /dev/null -w '%%{http_code}\\n' %s/health; done",
+			n, base),
+		Evidence: []map[string]interface{}{{
+			"requests_sent": n, "rate_limited": false,
+		}},
+	}}
+}
+
+// debugPaths are common debug/staging/inventory endpoints that should never be
+// reachable in production.
+var debugPaths = []string{
+	"/debug", "/debug/pprof", "/metrics", "/actuator", "/actuator/health",
+	"/console", "/phpinfo.php", "/.env", "/.git/config", "/admin/debug",
+}
+
+// checkDebugEndpoints probes for exposed debug/inventory endpoints that leak
+// internal information (OWASP API8 — Security Misconfiguration / API9 — Improper
+// Inventory Management).
+func checkDebugEndpoints(client *http.Client, base string) []finding {
+	var out []finding
+	for _, p := range debugPaths {
+		resp, err := client.Get(base + p)
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			continue
+		}
+		lower := strings.ToLower(string(body))
+		if strings.Contains(lower, "debug") || strings.Contains(lower, "secret") ||
+			strings.Contains(lower, "config") || strings.Contains(lower, "token") ||
+			strings.Contains(lower, "version") || strings.Contains(lower, "env") {
+			out = append(out, finding{
+				Severity: "HIGH",
+				Title:    "Exposed Debug Endpoint",
+				Endpoint: "GET " + p,
+				Detail: fmt.Sprintf(
+					"Debug/inventory endpoint %s is publicly reachable and returns internal information.",
+					p),
+				Reproduction: fmt.Sprintf("curl -s %s%s", base, p),
+				Evidence: []map[string]interface{}{{
+					"path": p, "http_status": resp.StatusCode,
+				}},
+			})
+		}
+	}
 	return out
 }

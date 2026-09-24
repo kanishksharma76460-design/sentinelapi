@@ -301,6 +301,13 @@
   
   .dynamic-results { margin-top: 40px; }
 
+  .attack-panel { padding: 24px; }
+  #attackSvg { width: 100%; height: auto; display: block; }
+  .attack-legend { display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; margin-top: 12px; }
+  .attack-legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: .08em; }
+  .attack-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .attack-legend .hub-key i { border-radius: 3px; }
+
   /* ── Hero typography ── */
   .hero-head { text-align: center; }
   .hero-title {
@@ -456,6 +463,9 @@
           <label><input type="checkbox" class="check-opt" value="bfla" checked/> BFLA</label>
           <label><input type="checkbox" class="check-opt" value="exposure" checked/> Data Exposure</label>
           <label><input type="checkbox" class="check-opt" value="missing-auth" checked/> Broken Auth</label>
+          <label><input type="checkbox" class="check-opt" value="security-misconfig" checked/> Misconfig</label>
+          <label><input type="checkbox" class="check-opt" value="rate-limit" checked/> Rate Limit</label>
+          <label><input type="checkbox" class="check-opt" value="debug-endpoints" checked/> Debug</label>
         </div>
 
         <button class="scan-btn" id="scanBtn">
@@ -513,6 +523,18 @@
         </table>
       </section>
     </div>
+
+    <section class="panel attack-panel" id="attackPanel" style="display:none;margin-top:24px;">
+      <div class="sum-title">🗺 ATTACK SURFACE MAP <span>•••</span></div>
+      <svg id="attackSvg" viewBox="0 0 820 420" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="attack-legend">
+        <span><i style="background:#e11d48"></i>Critical</span>
+        <span><i style="background:#ea580c"></i>High</span>
+        <span><i style="background:#ca8a04"></i>Medium</span>
+        <span><i style="background:#0284c7"></i>Low</span>
+        <span class="hub-key"><i style="background:#0f172a"></i>Target API</span>
+      </div>
+    </section>
 
     <section class="detect-section">
       <div class="sum-title">⛨ DETECTION ENGINE <span>•••</span></div>
@@ -1271,7 +1293,16 @@ const OWASP = {
      'Enforce role checks server-side on admin endpoints; never trust client-side roles.'],
   'Mass Assignment':
     ['API6', 'Mass Assignment',
-     'Whitelist allowed fields on create/update and reject or ignore unknown properties.']
+     'Whitelist allowed fields on create/update and reject or ignore unknown properties.'],
+  'Security Misconfiguration':
+    ['API8', 'Security Misconfiguration',
+     'Remove server-version headers and add X-Content-Type-Options, X-Frame-Options and HSTS.'],
+  'Missing Rate Limiting':
+    ['API4', 'Unrestricted Resource Consumption',
+     'Add rate limiting (429 + Retry-After) per client on every endpoint.'],
+  'Exposed Debug Endpoint':
+    ['API9', 'Improper Inventory Management',
+     'Remove or lock down debug/staging endpoints in production.']
 };
 
 function apiHeaders(json) {
@@ -1335,7 +1366,7 @@ document.querySelectorAll('.sidebar nav a').forEach(a => {
 async function startScan() {
   const target  = $('target').value.trim();
   const consent = $('consent').checked;
-  hide($('errBox')); hide($('cards')); hide($('empty')); hide($('stats')); hide($('certWrap'));
+  hide($('errBox')); hide($('cards')); hide($('empty')); hide($('stats')); hide($('certWrap')); hide($('attackPanel'));
 
   if (!target)  { showErr('SYS.ERR: TARGET_URL_REQUIRED');  return; }
   if (!consent) { showErr('SYS.ERR: AUTHORIZATION_MISSING'); return; }
@@ -1430,6 +1461,7 @@ async function poll(jobId) {
 function render(findings, target) {
   $('cards').innerHTML = '';
   renderStats(findings);
+  renderAttackSurface(findings, target);
   show($('certWrap'));
   playSuccessTone(); // 🔊 Fire warm ascending interval
   loadHistory();
@@ -1483,6 +1515,48 @@ function renderStats(findings) {
     row(c.MEDIUM,'Medium','#fadb14',3) +
     row(c.LOW,'Low','#00d2ff',4);
   s.style.display = 'grid';
+}
+
+// Attack-surface graph — radial hub-and-spoke map of vulnerable endpoints.
+function renderAttackSurface(findings, target) {
+  const panel = $('attackPanel'), svg = $('attackSvg');
+  if (!panel || !svg) return;
+  if (!findings.length) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+
+  const order = { CRITICAL:0, HIGH:1, MEDIUM:2, LOW:3 };
+  const map = {};
+  findings.forEach(f => {
+    const k = f.endpoint || '?';
+    if (!map[k]) map[k] = { endpoint: k, sev: f.severity || 'LOW', count: 0 };
+    map[k].count++;
+    if (order[f.severity] < order[map[k].sev]) map[k].sev = f.severity;
+  });
+  const nodes = Object.values(map);
+  const cx = 410, cy = 210, R = 150;
+  let host = target;
+  try { host = new URL(target).host; } catch {}
+  const colorOf = { CRITICAL:'#e11d48', HIGH:'#ea580c', MEDIUM:'#ca8a04', LOW:'#0284c7' };
+
+  let s = `<defs><radialGradient id="hubGrad"><stop offset="0%" stop-color="#0284c7"/><stop offset="100%" stop-color="#0f172a"/></radialGradient></defs>`;
+  s += `<circle cx="${cx}" cy="${cy}" r="34" fill="url(#hubGrad)" stroke="#00d2ff" stroke-width="2"/>
+    <text x="${cx}" y="${cy-4}" text-anchor="middle" fill="#fff" font-size="11" font-weight="900">API</text>
+    <text x="${cx}" y="${cy+12}" text-anchor="middle" fill="#cbd5e1" font-size="8">${esc(host).slice(0,20)}</text>`;
+
+  nodes.forEach((n, i) => {
+    const ang = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
+    const x = cx + R * Math.cos(ang), y = cy + R * Math.sin(ang);
+    const r = 12 + Math.min(n.count * 4, 14);
+    const c = colorOf[n.sev] || '#0284c7';
+    s += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="${c}" stroke-opacity="0.35" stroke-width="1.5"/>`;
+    s += `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}" opacity="0.9"><title>${esc(n.endpoint)} — ${n.count} finding(s)</title></circle>`;
+    s += `<text x="${x}" y="${y+3.5}" text-anchor="middle" fill="#fff" font-size="9" font-weight="900">${n.count}</text>`;
+    const lx = cx + (R + r + 34) * Math.cos(ang), ly = cy + (R + r + 34) * Math.sin(ang);
+    const anchor = lx < cx - 40 ? 'end' : (lx > cx + 40 ? 'start' : 'middle');
+    s += `<text x="${lx}" y="${ly+3}" text-anchor="${anchor}" fill="#0f172a" font-size="9" font-weight="700">${esc(n.endpoint)}</text>`;
+  });
+
+  svg.innerHTML = s;
 }
 
 function downloadCert() {
