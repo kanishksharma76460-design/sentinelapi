@@ -1337,10 +1337,13 @@ $('globalSearch').addEventListener('input', e => {
 $('scanBtn').addEventListener('click', startScan);
 $('target').addEventListener('keydown', e => { if (e.key === 'Enter') startScan(); });
 
-// One-click demo: prefill the local sandbox, consent, and run
+// One-click demo: prefill the sandbox, consent, and run
+const DEMO_TARGET = 'https://athera-secure-sandbox-production.up.railway.app';
 $('demoBtn').addEventListener('click', () => {
   const host = location.hostname || '127.0.0.1';
-  $('target').value = 'http://' + host + ':8000';
+  $('target').value = (host === 'localhost' || host === '127.0.0.1')
+    ? 'http://' + host + ':8000'
+    : DEMO_TARGET;
   $('consent').checked = true;
   startScan();
 });
