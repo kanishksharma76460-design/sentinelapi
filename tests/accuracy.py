@@ -47,6 +47,10 @@ GROUND_TRUTH = {
     ("HIGH", "Broken Authentication", "GET /orders/{order_id}", None),
     ("HIGH", "Broken Authentication", "PUT /users/{user_id}", None),
     ("HIGH", "Broken Authentication", "GET /admin/users", None),
+    # broken function-level authorization (regular user reaches admin endpoint)
+    ("HIGH", "Broken Function Level Authorization", "GET /admin/users", None),
+    # mass assignment (write endpoint accepts privileged fields)
+    ("HIGH", "Mass Assignment", "POST /users", None),
 }
 
 PORT = int(os.environ.get("ACC_PORT", "8011"))

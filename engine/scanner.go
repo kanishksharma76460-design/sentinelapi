@@ -56,15 +56,20 @@ func run(base, outJSON, outHTML string) error {
 	var findings []finding
 	seenBola := map[string]bool{}
 	for _, ep := range endpoints {
-		// baseline = a 200 response for A's own resource (or direct call)
-		filled, body := resolveBaseline(client, base, ep, userA, aToken)
-
 		findings = append(findings, checkBola(client, base, ep, userA, userB, aToken, seenBola)...)
-		if filled != "" && body != nil {
-			findings = append(findings, checkExposure(ep, body, base, filled, aToken)...)
-		}
-		if opHasSecurity(ep.Op) && filled != "" {
-			findings = append(findings, checkMissingAuth(client, ep, base, filled)...)
+		findings = append(findings, checkMassAssignment(client, base, ep, aToken)...)
+		findings = append(findings, checkBFLA(client, base, ep, aToken)...)
+
+		_, hasSchema := schemaPaths(ep.Op)
+		if hasSchema || opHasSecurity(ep.Op) {
+			// baseline = a 200 response for A's own resource (or direct call)
+			filled, body := resolveBaseline(client, base, ep, userA, aToken)
+			if hasSchema && filled != "" && body != nil {
+				findings = append(findings, checkExposure(ep, body, base, filled, aToken)...)
+			}
+			if opHasSecurity(ep.Op) && filled != "" {
+				findings = append(findings, checkMissingAuth(client, ep, base, filled)...)
+			}
 		}
 	}
 
@@ -151,6 +156,10 @@ func resolveBaseline(client *http.Client, base string, ep endpoint, a map[string
 				return cand, body
 			}
 		}
+		return "", nil
+	}
+	// no path params: only read endpoints get a baseline (avoid mutating writes)
+	if ep.Method != http.MethodGet && ep.Method != http.MethodHead {
 		return "", nil
 	}
 	status, body, err := doRequest(client, ep.Method, base+ep.Path, aToken)
@@ -268,12 +277,90 @@ func checkMissingAuth(client *http.Client, ep endpoint, base, filled string) []f
 	}}
 }
 
+// checkMassAssignment injects privileged fields into write endpoints and flags
+// any that accept and reflect them.
+func checkMassAssignment(client *http.Client, base string, ep endpoint, aToken string) []finding {
+	switch ep.Method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch:
+	default:
+		return nil
+	}
+	const injected = `{"username":"mallory","role":"admin","is_admin":true,"balance":999999}`
+	req, err := http.NewRequest(ep.Method, base+ep.Path, bytes.NewReader([]byte(injected)))
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if aToken != "" {
+		req.Header.Set("Authorization", "Bearer "+aToken)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil
+	}
+	data, _ := io.ReadAll(resp.Body)
+	var parsed interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return nil
+	}
+	var echoed []string
+	for _, f := range []string{"role", "is_admin"} {
+		if hasKey(parsed, f) {
+			echoed = append(echoed, f)
+		}
+	}
+	if len(echoed) == 0 {
+		return nil
+	}
+	return []finding{{
+		Severity: "HIGH",
+		Title:    "Mass Assignment",
+		Endpoint: ep.Method + " " + ep.Path,
+		Detail: fmt.Sprintf(
+			"The write endpoint accepts and persists privileged fields not part of its contract (%s). A client can escalate its own privileges.",
+			strings.Join(echoed, ", ")),
+		Reproduction: curlBody(ep.Method, base, ep.Path, aToken, injected),
+		Evidence:     []map[string]interface{}{{"injected_fields": echoed}},
+	}}
+}
+
+// checkBFLA flags admin-prefixed endpoints that a regular (non-admin) token can
+// access — broken function-level authorization.
+func checkBFLA(client *http.Client, base string, ep endpoint, aToken string) []finding {
+	if !strings.HasPrefix(ep.Path, "/admin/") {
+		return nil
+	}
+	status, _, err := doRequest(client, ep.Method, base+ep.Path, aToken)
+	if err != nil || status != http.StatusOK {
+		return nil
+	}
+	return []finding{{
+		Severity: "HIGH",
+		Title:    "Broken Function Level Authorization",
+		Endpoint: ep.Method + " " + ep.Path,
+		Detail: fmt.Sprintf(
+			"A regular (non-admin) token can access %s (HTTP 200); the endpoint should be restricted to admin roles.",
+			ep.Method+" "+ep.Path),
+		Reproduction: curlRepro(ep.Method, base, ep.Path, aToken),
+		Evidence:     []map[string]interface{}{{"role": "user", "http_status": 200}},
+	}}
+}
+
 func curlRepro(method, base, path, token string) string {
 	return fmt.Sprintf("curl -s -H 'Authorization: Bearer %s' '%s%s'", token, base, path)
 }
 
 func curlNoAuth(method, base, path string) string {
 	return fmt.Sprintf("curl -s -X %s '%s%s'", method, base, path)
+}
+
+func curlBody(method, base, path, token, body string) string {
+	return fmt.Sprintf("curl -s -X %s -H 'Authorization: Bearer %s' -H 'Content-Type: application/json' -d '%s' '%s%s'",
+		method, token, body, base, path)
 }
 
 func str(v interface{}) string {

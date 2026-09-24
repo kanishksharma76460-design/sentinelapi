@@ -39,6 +39,7 @@ app = FastAPI(
 _USERS: dict[int, dict] = {}
 _ORDERS: dict[int, dict] = {}
 _POSTS: dict[int, dict] = {}
+_ADMIN_TOKENS: set[str] = set()
 _next_id = 1
 
 
@@ -126,6 +127,8 @@ def register(body: RegisterBody):
     _next_id += 1
 
     token = f"tok_{uid}_secret"
+    if body.username == "admin":
+        _ADMIN_TOKENS.add(token)
 
     _USERS[uid] = {
         "id": uid,
@@ -203,9 +206,7 @@ def update_user(user_id: int, authorization: str = Header(default=""), body: dic
     user = _USERS.get(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="user not found")
-    if body:
-        user.update(body)  # mass-assignment: arbitrary fields accepted
-    return user
+    return user  # body accepted but ignored (no mass-assignment here)
 
 
 @app.get("/users/{user_id}/profile", responses={200: _PROFILE_PUBLIC_SCHEMA}, dependencies=[Depends(_api_key)])
@@ -243,6 +244,31 @@ def admin_users():
             for u in _USERS.values()
         ]
     }
+
+
+@app.get("/admin/stats", dependencies=[Depends(_api_key)])
+def admin_stats(authorization: str = Header(default="")):
+    """SECURE control: only admin tokens may access stats."""
+    token = authorization.removeprefix("Bearer ")
+    if token not in _ADMIN_TOKENS:
+        raise HTTPException(status_code=403, detail="forbidden")
+    return {"total_users": len(_USERS), "total_orders": len(_ORDERS)}
+
+
+@app.post("/users", status_code=201, dependencies=[Depends(_api_key)])
+def create_user(body: dict = Body(default={}), authorization: str = Header(default="")):
+    """FLAW: mass assignment — arbitrary fields (role, is_admin) are stored."""
+    token = authorization.removeprefix("Bearer ")
+    if not any(u["token"] == token for u in _USERS.values()):
+        raise HTTPException(status_code=403, detail="forbidden")
+    global _next_id
+    uid = _next_id
+    _next_id += 1
+    user = {"id": uid, "email": f"{body.get('username', 'anon')}@example.com"}
+    user.update(body)  # mass assignment: copies every supplied field, incl. role/is_admin
+    user.setdefault("username", "anon")
+    _USERS[uid] = user
+    return user
 
 
 @app.get("/health")

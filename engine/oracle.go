@@ -208,3 +208,25 @@ func lastSegment(p string) string {
 	}
 	return p
 }
+
+// hasKey reports whether `key` appears as an object key anywhere in the JSON.
+func hasKey(obj interface{}, key string) bool {
+	switch t := obj.(type) {
+	case map[string]interface{}:
+		if _, ok := t[key]; ok {
+			return true
+		}
+		for _, v := range t {
+			if hasKey(v, key) {
+				return true
+			}
+		}
+	case []interface{}:
+		for _, v := range t {
+			if hasKey(v, key) {
+				return true
+			}
+		}
+	}
+	return false
+}

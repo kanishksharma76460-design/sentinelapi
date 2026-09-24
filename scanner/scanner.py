@@ -159,6 +159,16 @@ def last_segment(p: str) -> str:
     return p.rsplit(".", 1)[-1]
 
 
+def has_key(obj, key: str) -> bool:
+    if isinstance(obj, dict):
+        if key in obj:
+            return True
+        return any(has_key(v, key) for v in obj.values())
+    if isinstance(obj, list):
+        return any(has_key(v, key) for v in obj)
+    return False
+
+
 def sensitive(key: str) -> bool:
     k = key.lower()
     return any(h in k for h in SENSITIVE_HINTS)
@@ -170,6 +180,11 @@ def curl_repro(method: str, base: str, path: str, token: str) -> str:
 
 def curl_no_auth(method: str, base: str, path: str) -> str:
     return f"curl -s -X {method} '{base}{path}'"
+
+
+def curl_body(method: str, base: str, path: str, token: str, body: str) -> str:
+    return (f"curl -s -X {method} -H 'Authorization: Bearer {token}' "
+            f"-H 'Content-Type: application/json' -d '{body}' '{base}{path}'")
 
 
 def do_request(client, method, url, token):
@@ -273,6 +288,66 @@ def check_missing_auth(client, endpoint, base, filled) -> list[Finding]:
         ),
         reproduction=curl_no_auth(method, base, filled),
         evidence=[{"http_status": 200}],
+    )]
+
+
+def check_mass_assignment(client, base, endpoint, a_token) -> list[Finding]:
+    """Inject privileged fields into write endpoints; flag if accepted & echoed."""
+    method, path, _op = endpoint
+    if method not in ("POST", "PUT", "PATCH"):
+        return []
+    injected = '{"username":"mallory","role":"admin","is_admin":true,"balance":999999}'
+    try:
+        r = client.request(method, base + path, content=injected, headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {a_token}",
+        })
+    except httpx.HTTPError:
+        return []
+    if r.status_code not in (200, 201):
+        return []
+    try:
+        body = r.json()
+    except ValueError:
+        return []
+    echoed = [f for f in ("role", "is_admin") if has_key(body, f)]
+    if not echoed:
+        return []
+    return [Finding(
+        severity="HIGH",
+        title="Mass Assignment",
+        endpoint=f"{method} {path}",
+        detail=(
+            "The write endpoint accepts and persists privileged fields not part "
+            f"of its contract ({', '.join(echoed)}). A client can escalate its "
+            "own privileges."
+        ),
+        reproduction=curl_body(method, base, path, a_token, injected),
+        evidence=[{"injected_fields": echoed}],
+    )]
+
+
+def check_bfa(client, base, endpoint, a_token) -> list[Finding]:
+    """Flag admin-prefixed endpoints a regular (non-admin) token can access."""
+    method, path, _op = endpoint
+    if not path.startswith("/admin/"):
+        return []
+    try:
+        status, _ = do_request(client, method, base + path, a_token)
+    except httpx.HTTPError:
+        return []
+    if status != 200:
+        return []
+    return [Finding(
+        severity="HIGH",
+        title="Broken Function Level Authorization",
+        endpoint=f"{method} {path}",
+        detail=(
+            f"A regular (non-admin) token can access {method} {path} (HTTP 200); "
+            "the endpoint should be restricted to admin roles."
+        ),
+        reproduction=curl_repro(method, base, path, a_token),
+        evidence=[{"role": "user", "http_status": 200}],
     )]
 
 
@@ -390,6 +465,8 @@ def main() -> int:
                 if status == 200:
                     return cand, body
             return "", None
+        if method not in ("GET", "HEAD"):
+            return "", None  # avoid mutating writes
         try:
             status, body = do_request(client, method, base + path, a_token)
         except httpx.HTTPError:
@@ -399,12 +476,17 @@ def main() -> int:
     findings: list[Finding] = []
     seen: set = set()
     for ep in endpoints:
-        filled, body = resolve_baseline(ep)
         findings += check_bola(client, base, ep, user_a, user_b, seen)
-        if filled and body is not None:
-            findings += check_exposure(ep, body, base, filled, user_a)
-        if op_has_security(ep[2]) and filled:
-            findings += check_missing_auth(client, ep, base, filled)
+        findings += check_mass_assignment(client, base, ep, a_token)
+        findings += check_bfa(client, base, ep, a_token)
+
+        declared = schema_paths(ep[2])
+        if declared is not None or op_has_security(ep[2]):
+            filled, body = resolve_baseline(ep)
+            if declared is not None and filled and body is not None:
+                findings += check_exposure(ep, body, base, filled, user_a)
+            if op_has_security(ep[2]) and filled:
+                findings += check_missing_auth(client, ep, base, filled)
 
     findings.sort(key=lambda f: SEVERITY_ORDER.get(f.severity, 9))
 
