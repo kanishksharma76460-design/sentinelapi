@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import AttackGraph from './components/AttackGraph.jsx'
 import Eye from './components/Eye.jsx'
+import Guide from './components/Guide.jsx'
 import HeroGrid from './components/HeroGrid.jsx'
 import Logo from './components/Logo.jsx'
 import RobotFace from './components/RobotFace.jsx'
@@ -79,6 +80,7 @@ export default function App() {
   const [loginUser, setLoginUser] = useState('')
   const [loginPass, setLoginPass] = useState('')
   const [loginError, setLoginError] = useState('')
+  const [guideOpen, setGuideOpen] = useState(false)
   const termRef = useRef(null)
   const wsRef = useRef(null)
 
@@ -325,6 +327,8 @@ export default function App() {
         </div>
       )}
 
+      {guideOpen && <Guide onClose={() => setGuideOpen(false)} />}
+
       {/* ── Nav ── */}
       <nav className="nav">
         <div className="logo">
@@ -335,6 +339,7 @@ export default function App() {
           <a href="#scan">Scan</a>
           <a href="#results">Results</a>
           <a href="#history">History</a>
+          <button onClick={() => setGuideOpen(true)}>Guide</button>
           {sessionOn && <button onClick={doLogout}>Logout</button>}
           <input
             type="password"

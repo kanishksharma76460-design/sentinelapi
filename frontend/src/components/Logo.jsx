@@ -26,14 +26,15 @@ export default function Logo({ size = 30 }) {
       <path d="M32 6.5 L53.5 12.8 V30 C53.5 43 43.5 52 32 57.8 C20.5 52 10.5 43 10.5 30 V12.8 Z"
         stroke="#39ff14" strokeWidth="0.75" opacity="0.4" fill="none" />
 
-      {/* iris (eye) */}
-      <circle cx="32" cy="32" r="16.5" stroke="#39ff14" strokeWidth="1.5" fill="url(#lg-iris)" />
-      <circle cx="32" cy="32" r="11.5" stroke="rgba(0,0,0,0.35)" strokeWidth="0.8" fill="none" />
-      <circle cx="32" cy="32" r="6.5" fill="url(#lg-pupil)" stroke="#39ff14" strokeWidth="0.5" />
+      {/* iris (hexagonal eye) */}
+      <polygon points="16,32 24,14.5 40,14.5 48,32 40,49.5 24,49.5" fill="url(#lg-iris)" stroke="#39ff14" strokeWidth="1.5" strokeLinejoin="round" />
+
+      {/* slit pupil */}
+      <polygon points="23,32 27,28.5 37,28.5 41,32 37,35.5 27,35.5" fill="#020a03" stroke="#39ff14" strokeWidth="0.6" />
 
       {/* glint / specular highlight */}
-      <circle cx="25" cy="24" r="3.4" fill="#f0fff0" opacity="0.95" />
-      <circle cx="27.5" cy="26" r="1.4" fill="#ffffff" opacity="0.8" />
+      <circle cx="26" cy="24" r="3.4" fill="#f0fff0" opacity="0.95" />
+      <circle cx="28.5" cy="26" r="1.4" fill="#ffffff" opacity="0.8" />
 
       {/* scan beam */}
       <line x1="15" y1="32" x2="49" y2="32" stroke="#c8ffd0" strokeWidth="1" opacity="0.65" />
