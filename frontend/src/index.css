@@ -135,6 +135,8 @@ body::after {
 .hero-copy { position: relative; z-index: 1; max-width: 780px; display: flex; flex-direction: column; align-items: center; }
 .eyebrow { display: inline-flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: 11px; letter-spacing: .22em; text-transform: uppercase; color: var(--cyan); border: 1px solid var(--line-strong); padding: 7px 14px; }
 .eyebrow .dot { width: 7px; height: 7px; background: var(--green); box-shadow: 0 0 10px var(--green); animation: blink 1.4s infinite; }
+.eyebrow.down { color: var(--red); border-color: rgba(255,77,94,.4); }
+.eyebrow.down .dot { background: var(--red); box-shadow: 0 0 10px var(--red); }
 .hero h1 { font-size: clamp(34px, 5vw, 56px); font-weight: 800; letter-spacing: .02em; line-height: 1.08; margin: 22px 0 16px; text-transform: uppercase; font-family: var(--display); text-shadow: 0 0 40px rgba(251,191,36,.3); }
 .hero h1 .accent { color: var(--cyan); text-shadow: 0 0 24px rgba(251,191,36,.6); }
 .hero p { font-family: var(--mono); font-size: 13px; line-height: 1.7; color: var(--dim); max-width: 540px; margin: 0 auto; }
@@ -182,6 +184,9 @@ body::after {
 .demo-link button { background: none; border: none; color: var(--cyan); font-family: var(--mono); font-size: 12px; text-decoration: underline; padding: 0; }
 .consent { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 16px; font-family: var(--mono); font-size: 12px; color: var(--dim); cursor: pointer; user-select: none; }
 .consent input { accent-color: var(--cyan); }
+.webhook { width: 100%; max-width: 430px; margin-top: 14px; padding: 9px 12px; font-family: var(--mono); font-size: 12px; background: rgba(251,191,36,0.04); border: 1px solid var(--line); color: var(--text); transition: .2s; }
+.webhook:focus { outline: none; border-color: var(--cyan); }
+.webhook::placeholder { color: var(--faint); }
 .checks { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 14px; }
 .check { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; letter-spacing: .04em; color: var(--dim); border: 1px solid var(--line); padding: 6px 12px; cursor: pointer; transition: .15s; }
 .check:hover { color: var(--text); border-color: var(--line-strong); }
@@ -251,6 +256,8 @@ body::after {
 .hrow .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hrow .g { font-weight: 800; }
 .hrow .meta { color: var(--dim); font-size: 11px; }
+.sevcounts { display: inline-flex; gap: 8px; font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .04em; }
+.sevcounts i { font-style: normal; }
 .hrow .acts { display: flex; gap: 8px; }
 .hrow .acts a, .hrow .acts button { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; color: var(--dim); background: none; border: none; padding: 4px 6px; text-transform: uppercase; }
 .hrow .acts a:hover, .hrow .acts button:hover { color: var(--cyan); }

@@ -5,7 +5,7 @@ import Logo from './components/Logo.jsx'
 import SynthGrid from './components/SynthGrid.jsx'
 import {
   ALL_CHECKS, DEMO_TARGET, OWASP, SEV,
-  startScan, getScan, listScans, cancelScan, deleteScan, reportUrl
+  startScan, getScan, listScans, getHealth, cancelScan, deleteScan, reportUrl
 } from './api.js'
 
 const STAGES = ['TARGETING', 'PROBING', 'EXPLOITING', 'GRADING']
@@ -64,6 +64,8 @@ export default function App() {
   const [booted, setBooted] = useState(false)
   const [bootGone, setBootGone] = useState(false)
   const [bootLine, setBootLine] = useState(0)
+  const [health, setHealth] = useState(null)
+  const [webhookUrl, setWebhookUrl] = useState('')
   const termRef = useRef(null)
 
   function finishBoot() {
@@ -72,6 +74,9 @@ export default function App() {
   }
 
   useEffect(() => { loadHistory() }, [])
+  useEffect(() => {
+    getHealth().then(setHealth).catch(() => setHealth({ engine: false }))
+  }, [])
   useEffect(() => { const t = setTimeout(finishBoot, 2100); return () => clearTimeout(t) }, [])
   useEffect(() => {
     const iv = setInterval(() => setBootLine(l => Math.min(l + 1, BOOT_LINES.length - 1)), 300)
@@ -143,12 +148,12 @@ export default function App() {
     }
   }
 
-  async function runScan(t, c, chk) {
+  async function runScan(t, c, chk, wh) {
     setError('')
     showTerminal()
     setScanning(true)
     try {
-      const data = await startScan(t, c, chk, null)
+      const data = await startScan(t, c, chk, wh || null)
       poll(data.job_id)
     } catch (e) {
       setScanning(false)
@@ -159,13 +164,13 @@ export default function App() {
   async function doScan() {
     if (!target.trim()) { setError('Target URL is required'); return }
     if (!consent) { setError('Confirm authorization before scanning'); return }
-    await runScan(target.trim(), consent, [...checks])
+    await runScan(target.trim(), consent, [...checks], webhookUrl)
   }
 
   function demo() {
     setTarget(DEMO_TARGET)
     setConsent(true)
-    runScan(DEMO_TARGET, true, [...checks])
+    runScan(DEMO_TARGET, true, [...checks], webhookUrl)
   }
 
   async function removeScan(id) {
@@ -226,7 +231,10 @@ export default function App() {
           <Eye open={booted} scanning={scanning} done={!!findings} grade={grade} />
         </div>
         <div className="hero-copy">
-          <span className="eyebrow"><span className="dot" /> AEGIS SYSTEM // ONLINE</span>
+          <span className={'eyebrow' + (!health || !health.engine ? ' down' : '')}>
+            <span className="dot" />
+            {!health ? 'AEGIS SYSTEM // LINKING…' : health.engine ? 'AEGIS SYSTEM // ONLINE' : 'AEGIS SYSTEM // ENGINE OFFLINE'}
+          </span>
           <h1>Find what your API <span className="accent">leaks.</span></h1>
           <p>
             Athera Secure scans any API for broken access control, leaked data and
@@ -256,6 +264,15 @@ export default function App() {
               <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />
               I confirm ownership &amp; authorization to scan this target.
             </label>
+
+            <input
+              className="webhook"
+              type="text"
+              value={webhookUrl}
+              onChange={e => setWebhookUrl(e.target.value)}
+              placeholder="Webhook URL (optional) — POSTed when the scan completes"
+              spellCheck={false}
+            />
 
             <div className="checks">
               {ALL_CHECKS.map(c => (
@@ -344,8 +361,15 @@ export default function App() {
           {history.map(s => (
             <div className="hrow" key={s.job_id}>
               <span className="t">{s.target}</span>
-              {s.status === 'done' && s.grade && <span className="g" style={{ color: '#8b5cf6' }}>{s.grade.grade}</span>}
+              {s.status === 'done' && s.grade && <span className="g" style={{ color: '#fbbf24' }}>{s.grade.grade}</span>}
               <span className="meta">{s.status === 'done' ? `${s.findings} findings` : s.status}</span>
+              {s.status === 'done' && s.counts && (
+                <span className="sevcounts">
+                  {[['CRITICAL', '#f43f5e'], ['HIGH', '#fb923c'], ['MEDIUM', '#facc15'], ['LOW', '#38bdf8']]
+                    .filter(([k]) => s.counts[k] > 0)
+                    .map(([k, col]) => <i key={k} style={{ color: col }}>{s.counts[k]}{k[0]}</i>)}
+                </span>
+              )}
               <div className="acts">
                 {s.status === 'done' && (
                   <>

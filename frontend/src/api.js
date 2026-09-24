@@ -31,6 +31,12 @@ export async function listScans() {
   return r.json()
 }
 
+export async function getHealth() {
+  const r = await fetch('/api/health', { headers: headers() })
+  if (!r.ok) throw new Error('health check failed')
+  return r.json()
+}
+
 export async function cancelScan(jobId) {
   const r = await fetch(`/api/scan/${jobId}/cancel`, { method: 'POST', headers: headers() })
   return r.ok
