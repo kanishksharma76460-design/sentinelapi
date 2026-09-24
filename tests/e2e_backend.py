@@ -123,7 +123,34 @@ def main() -> int:
         print("findings:", len(findings))
         assert len(findings) == 19, f"expected 19 findings, got {len(findings)}"
 
-        print("RESULT: PASS ✅  (health, consent, SSRF guard, 19 findings)")
+        # 5. JSON report download
+        s, body = request("GET", BK_BASE + f"/api/scan/{job_id}/report.json")
+        assert s == 200, body
+        assert len(body.get("findings", [])) == 19, "JSON report findings mismatch"
+
+        # 6. PDF report download
+        req = urllib.request.Request(
+            BK_BASE + f"/api/scan/{job_id}/report.pdf")
+        with urllib.request.urlopen(req, timeout=10) as r:
+            pdf = r.read()
+        assert pdf[:4] == b"%PDF", "PDF report does not start with %PDF"
+
+        # 7. invalid checks rejected
+        s, body = request("POST", BK_BASE + "/api/scan",
+                          {"target": API_BASE, "consent": True,
+                           "checks": ["bogus"]})
+        print("bad-checks ->", s, body.get("detail"))
+        assert s == 400
+
+        # 8. delete scan
+        s, body = request("DELETE", BK_BASE + f"/api/scan/{job_id}")
+        print("delete ->", s, body)
+        assert s == 200
+        s, _ = request("GET", BK_BASE + f"/api/scan/{job_id}")
+        assert s == 404, "deleted scan still fetchable"
+
+        print("RESULT: PASS ✅  (health, consent, SSRF, 19 findings, "
+              "JSON+PDF reports, check validation, delete)")
         return 0
     finally:
         bk.terminate(); bk.wait()

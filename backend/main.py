@@ -1,12 +1,27 @@
 """
-SentinelAPI — hosted product backend.
+SentinelAPI — hosted product backend (production-ready).
 
 Exposes:
-  GET  /                    -> static scan UI
-  POST /api/scan            -> {target, consent}  -> validates, SSRF-guards,
-                               queues a scan, returns job_id
-  GET  /api/scan/{job_id}   -> status + findings
-  GET  /api/health          -> liveness
+  GET  /                              -> static scan UI
+  POST /api/scan                      -> {target, consent, checks?, webhook_url?}
+                                         validates, SSRF-guards, enqueues a scan
+  GET  /api/scan/{job_id}             -> status + findings
+  POST /api/scan/{job_id}/cancel      -> cancel an in-flight scan
+  DELETE /api/scan/{job_id}           -> delete a scan from history
+  GET  /api/scan/{job_id}/report      -> downloadable HTML report
+  GET  /api/scan/{job_id}/report.json -> downloadable JSON report
+  GET  /api/scan/{job_id}/report.pdf  -> downloadable PDF report
+  GET  /api/scans                     -> recent scans + severity counts
+  GET  /api/health                    -> liveness + version
+
+Security / hardening:
+  * SSRF guard        — blocks private/loopback/link-local/reserved addresses
+  * API key auth      — SENTINEL_API_KEY (enforced when set)
+  * Rate limiting     — per-client-IP sliding window (RATE_LIMIT_PER_MINUTE)
+  * Bounded job pool  — MAX_WORKERS concurrent scans (no unbounded threads)
+  * Cancel support    — in-flight engine subprocesses can be killed
+  * Webhook notify    — optional POST on completion (webhook_url in request)
+  * CORS              — CORS_ORIGINS for a separate frontend origin
 
 Runs the Go engine (engine/sentinel-engine) as a subprocess and persists scan
 history in SQLite. Set ALLOW_PRIVATE_SCAN=1 only for local development.
@@ -15,7 +30,9 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import os
+import secrets
 import socket
 import sqlite3
 import subprocess
@@ -23,10 +40,13 @@ import tempfile
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
@@ -34,11 +54,37 @@ ROOT = Path(__file__).resolve().parent.parent
 STATIC = Path(__file__).resolve().parent / "static"
 ENGINE_BIN = ROOT / "engine" / "sentinel-engine"
 DB_PATH = Path(os.environ.get("DB_PATH", str(ROOT / "scans.db")))
+
+# ---- environment-driven configuration --------------------------------------
 ALLOW_PRIVATE = os.environ.get("ALLOW_PRIVATE_SCAN", "0") == "1"
+API_KEY = os.environ.get("SENTINEL_API_KEY", "").strip()
+RATE_LIMIT_ENABLED = os.environ.get("RATE_LIMIT_ENABLED", "1") == "1"
+RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "10"))
+MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "4"))
+SCAN_TIMEOUT = int(os.environ.get("SCAN_TIMEOUT_SECONDS", "120"))
+CORS_ORIGINS = [o.strip() for o in os.environ.get(
+    "CORS_ORIGINS", "*").split(",") if o.strip()]
+
+VALID_CHECKS = {"bola", "mass-assignment", "bfla", "exposure", "missing-auth"}
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+log = logging.getLogger("sentinelapi")
 
 app = FastAPI(title="SentinelAPI", version="1.0.0")
 
-# ---- job store (SQLite) ----------------------------------------------------
+if CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ORIGINS,
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+# ---- SQLite job store ------------------------------------------------------
 _conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
 _conn.execute(
     "CREATE TABLE IF NOT EXISTS scans ("
@@ -47,10 +93,35 @@ _conn.execute(
 _conn.commit()
 _lock = threading.Lock()
 
+# ---- bounded worker pool + in-flight job registry ---------------------------
+_executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+_jobs: dict[str, subprocess.Popen] = {}          # job_id -> running engine proc
+_job_lock = threading.Lock()
+
+
+def _db_update(sql: str, params: tuple) -> None:
+    with _lock:
+        _conn.execute(sql, params)
+        _conn.commit()
+
+
+def set_status(job_id: str, status: str, *, findings: list | None = None,
+               error: str | None = None) -> None:
+    if findings is not None:
+        _db_update("UPDATE scans SET status=?, findings=?, error=? WHERE id=?",
+                   (status, json.dumps(findings), error or "", job_id))
+    elif error is not None:
+        _db_update("UPDATE scans SET status=?, error=? WHERE id=?",
+                   (status, error, job_id))
+    else:
+        _db_update("UPDATE scans SET status=? WHERE id=?", (status, job_id))
+
 
 class ScanRequest(BaseModel):
     target: str
     consent: bool = False
+    checks: list[str] | None = None
+    webhook_url: str | None = None
 
 
 # ---- SSRF guard ------------------------------------------------------------
@@ -76,37 +147,140 @@ def validate_target(url: str) -> str:
     return url
 
 
+def validate_checks(checks: list[str] | None) -> list[str] | None:
+    """Normalise user-selected checks, or None to run everything."""
+    if checks is None:
+        return None
+    clean = [c.strip().lower() for c in checks if c.strip()]
+    bad = [c for c in clean if c not in VALID_CHECKS]
+    if bad:
+        raise ValueError(
+            f"unknown check(s): {', '.join(bad)} — "
+            f"valid: {', '.join(sorted(VALID_CHECKS))}")
+    return clean or None
+
+
+# ---- auth / rate-limit -----------------------------------------------------
+def require_auth(request: Request) -> None:
+    """Enforce API-key auth when SENTINEL_API_KEY is configured."""
+    if not API_KEY:
+        return
+    auth = request.headers.get("authorization", "")
+    provided = ""
+    if auth.startswith("Bearer "):
+        provided = auth[7:].strip()
+    else:
+        provided = request.headers.get("x-api-key", "").strip()
+    if not provided or not secrets.compare_digest(provided, API_KEY):
+        raise HTTPException(401, "missing or invalid API key")
+
+
+_rate_hits: dict[str, list[float]] = {}
+_rate_lock = threading.Lock()
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def enforce_rate_limit(request: Request) -> None:
+    if not RATE_LIMIT_ENABLED or RATE_LIMIT_PER_MINUTE <= 0:
+        return
+    ip = _client_ip(request)
+    now = time.time()
+    with _rate_lock:
+        hits = _rate_hits.setdefault(ip, [])
+        hits[:] = [t for t in hits if now - t < 60.0]
+        if len(hits) >= RATE_LIMIT_PER_MINUTE:
+            retry_after = max(1, int(60 - (now - hits[0])))
+            raise HTTPException(
+                429,
+                f"rate limit exceeded — try again in {retry_after}s",
+                headers={"Retry-After": str(retry_after)})
+        hits.append(now)
+
+
 # ---- engine execution ------------------------------------------------------
-def execute_engine(target: str) -> list:
-    if not ENGINE_BIN.exists():
-        subprocess.run(["go", "build", "-o", "sentinel-engine", "."],
-                       cwd=ROOT / "engine", check=True,
-                       capture_output=True, timeout=300)
+class ScanCancelled(Exception):
+    pass
+
+
+def _ensure_engine_binary() -> None:
+    if ENGINE_BIN.exists():
+        return
+    subprocess.run(["go", "build", "-o", "sentinel-engine", "."],
+                   cwd=ROOT / "engine", check=True,
+                   capture_output=True, timeout=300)
+
+
+def execute_engine(target: str, checks: list[str] | None,
+                   job_id: str) -> list:
+    _ensure_engine_binary()
+    cmd = [str(ENGINE_BIN), "--base", target,
+           "--checks", ",".join(checks) if checks else "all"]
     with tempfile.TemporaryDirectory() as td:
         out_json = os.path.join(td, "findings.json")
         out_html = os.path.join(td, "report.html")
-        subprocess.run(
-            [str(ENGINE_BIN), "--base", target,
-             "--out-json", out_json, "--out-html", out_html],
-            cwd=ROOT, check=True, capture_output=True, timeout=120)
+        cmd += ["--out-json", out_json, "--out-html", out_html]
+
+        proc = subprocess.Popen(cmd, cwd=ROOT,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+        with _job_lock:
+            _jobs[job_id] = proc
+        try:
+            stdout, stderr = proc.communicate(timeout=SCAN_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            raise RuntimeError(f"scan exceeded {SCAN_TIMEOUT}s timeout")
+        finally:
+            with _job_lock:
+                _jobs.pop(job_id, None)
+
+        if proc.returncode != 0:
+            detail = (stderr or stdout).decode(errors="replace").strip()
+            raise RuntimeError(detail or f"engine exited {proc.returncode}")
+
         with open(out_json) as fh:
             return json.load(fh)
 
 
-def run_scan(job_id: str, target: str) -> None:
+# ---- webhook notification --------------------------------------------------
+def notify_webhook(webhook_url: str, payload: dict) -> None:
     try:
-        findings = execute_engine(target)
-        with _lock:
-            _conn.execute(
-                "UPDATE scans SET status='done', findings=? WHERE id=?",
-                (json.dumps(findings), job_id))
-            _conn.commit()
-    except Exception as exc:  # noqa: BLE001 - surface to the client
-        with _lock:
-            _conn.execute(
-                "UPDATE scans SET status='error', error=? WHERE id=?",
-                (str(exc), job_id))
-            _conn.commit()
+        import urllib.request
+        req = urllib.request.Request(
+            webhook_url, data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as exc:  # noqa: BLE001 — best-effort only
+        log.warning("webhook delivery failed: %s", exc)
+
+
+def run_scan(job_id: str, target: str, checks: list[str] | None,
+             webhook_url: str | None) -> None:
+    set_status(job_id, "running")
+    try:
+        findings = execute_engine(target, checks, job_id)
+        set_status(job_id, "done", findings=findings)
+        log.info("scan %s done: %d finding(s)", job_id[:8], len(findings))
+        if webhook_url:
+            notify_webhook(webhook_url, {
+                "job_id": job_id, "target": target, "status": "done",
+                "findings": findings,
+            })
+    except Exception as exc:  # noqa: BLE001 — surface to the client
+        set_status(job_id, "error", error=str(exc))
+        log.warning("scan %s failed: %s", job_id[:8], exc)
+        if webhook_url:
+            notify_webhook(webhook_url, {
+                "job_id": job_id, "target": target, "status": "error",
+                "error": str(exc),
+            })
 
 
 # ---- routes ----------------------------------------------------------------
@@ -117,31 +291,40 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "version": app.version,
+        "engine": ENGINE_BIN.exists(),
+        "auth_enforced": bool(API_KEY),
+        "rate_limit_per_minute": RATE_LIMIT_PER_MINUTE,
+    }
 
 
 @app.post("/api/scan")
-def scan(req: ScanRequest):
+def scan(req: ScanRequest, request: Request):
+    require_auth(request)
+    enforce_rate_limit(request)
     if not req.consent:
         raise HTTPException(400, "You must confirm you are authorized to scan this target")
     try:
         target = validate_target(req.target)
+        checks = validate_checks(req.checks)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
     job_id = uuid.uuid4().hex
-    with _lock:
-        _conn.execute(
-            "INSERT INTO scans (id, target, status, findings, error, created_at)"
-            " VALUES (?,?,?,?,?,?)",
-            (job_id, target, "queued", "", "", time.time()))
-        _conn.commit()
-    threading.Thread(target=run_scan, args=(job_id, target), daemon=True).start()
+    _db_update(
+        "INSERT INTO scans (id, target, status, findings, error, created_at)"
+        " VALUES (?,?,?,?,?,?)",
+        (job_id, target, "queued", "", "", time.time()))
+    _executor.submit(run_scan, job_id, target, checks, req.webhook_url)
+    log.info("scan %s queued for %s", job_id[:8], target)
     return {"job_id": job_id, "status": "queued"}
 
 
 @app.get("/api/scan/{job_id}")
-def scan_status(job_id: str):
+def scan_status(job_id: str, request: Request):
+    require_auth(request)
     with _lock:
         row = _conn.execute(
             "SELECT target, status, findings, error FROM scans WHERE id=?",
@@ -158,9 +341,43 @@ def scan_status(job_id: str):
     }
 
 
+@app.post("/api/scan/{job_id}/cancel")
+def cancel_scan(job_id: str, request: Request):
+    require_auth(request)
+    with _job_lock:
+        proc = _jobs.get(job_id)
+    with _lock:
+        row = _conn.execute("SELECT status FROM scans WHERE id=?",
+                            (job_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "scan not found")
+    if row[0] not in ("queued", "running"):
+        raise HTTPException(409, f"scan is already {row[0]}")
+    if proc is not None:
+        proc.kill()
+    set_status(job_id, "cancelled")
+    return {"job_id": job_id, "status": "cancelled"}
+
+
+@app.delete("/api/scan/{job_id}")
+def delete_scan(job_id: str, request: Request):
+    require_auth(request)
+    with _job_lock:
+        proc = _jobs.get(job_id)
+    if proc is not None:
+        proc.kill()
+    with _lock:
+        cur = _conn.execute("DELETE FROM scans WHERE id=?", (job_id,))
+        _conn.commit()
+    if cur.rowcount == 0:
+        raise HTTPException(404, "scan not found")
+    return {"job_id": job_id, "deleted": True}
+
+
 @app.get("/api/scans")
-def list_scans():
+def list_scans(request: Request):
     """Recent scans with per-severity counts, for the dashboard history panel."""
+    require_auth(request)
     with _lock:
         rows = _conn.execute(
             "SELECT id, target, status, findings, created_at FROM scans"
@@ -189,12 +406,29 @@ def list_scans():
     return {"scans": scans}
 
 
-def _render_report(target: str, findings: list) -> str:
+def _get_done_scan(job_id: str):
+    with _lock:
+        row = _conn.execute(
+            "SELECT target, status, findings FROM scans WHERE id=?",
+            (job_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "scan not found")
+    target, status, findings = row
+    if status != "done":
+        raise HTTPException(409, f"scan is not complete (status={status})")
+    return target, json.loads(findings) if findings else []
+
+
+# ---- report rendering ------------------------------------------------------
+_SEV_COLORS = {"CRITICAL": "#f43f5e", "HIGH": "#fb923c",
+               "MEDIUM": "#facc15", "LOW": "#60a5fa"}
+
+
+def _render_report_html(target: str, findings: list) -> str:
     cards = []
     for f in findings:
         sev = f.get("severity", "LOW")
-        color = {"CRITICAL": "#f43f5e", "HIGH": "#fb923c",
-                 "MEDIUM": "#facc15", "LOW": "#60a5fa"}.get(sev, "#8b96ad")
+        color = _SEV_COLORS.get(sev, "#8b96ad")
         cards.append(
             f'<div style="background:#161b22;border:1px solid #30363d;'
             f'border-radius:12px;padding:16px;margin:12px 0;">'
@@ -217,20 +451,87 @@ def _render_report(target: str, findings: list) -> str:
         f'{body}</body></html>')
 
 
+def _render_report_pdf(target: str, findings: list) -> bytes:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer,
+                                    Table, TableStyle)
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            rightMargin=48, leftMargin=48,
+                            topMargin=48, bottomMargin=48)
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph("Security Scan Report", styles["Title"]),
+        Paragraph(f"Target: {target} — {len(findings)} finding(s)",
+                  styles["Normal"]),
+        Spacer(1, 20),
+    ]
+    if not findings:
+        story.append(Paragraph("No vulnerabilities detected ✓", styles["Normal"]))
+    for f in findings:
+        sev = f.get("severity", "LOW")
+        color = getattr(colors, {
+            "CRITICAL": "red", "HIGH": "orange",
+            "MEDIUM": "gold", "LOW": "skyblue"}.get(sev, "grey"))
+        story.append(Table(
+            [[Paragraph(f'<b>[{sev}] {f.get("title", "")}</b>',
+                        styles["Heading3"])],
+             [Paragraph(f.get("endpoint", ""), styles["Code"])],
+             [Paragraph(f.get("detail", ""), styles["Normal"])],
+             [Paragraph(f.get("reproduction", ""), styles["Code"])]],
+            colWidths=[doc.width],
+            style=TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.whitesmoke),
+                ("BOX", (0, 0), (-1, -1), 1, color),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ])))
+        story.append(Spacer(1, 12))
+    doc.build(story)
+    return buf.getvalue()
+
+
 @app.get("/api/scan/{job_id}/report")
-def scan_report(job_id: str):
+def scan_report(job_id: str, request: Request):
     """Download a self-contained HTML report for a completed scan."""
-    with _lock:
-        row = _conn.execute(
-            "SELECT target, status, findings FROM scans WHERE id=?",
-            (job_id,)).fetchone()
-    if row is None:
-        raise HTTPException(404, "scan not found")
-    target, status, findings = row
-    if status != "done":
-        raise HTTPException(409, "scan is not complete")
-    html = _render_report(target, json.loads(findings) if findings else [])
+    require_auth(request)
+    target, findings = _get_done_scan(job_id)
+    html = _render_report_html(target, findings)
     return Response(
         content=html, media_type="text/html",
-        headers={"Content-Disposition": f'attachment; filename="sentinelapi-{job_id[:8]}.html"'},
-    )
+        headers={"Content-Disposition":
+                 f'attachment; filename="sentinelapi-{job_id[:8]}.html"'})
+
+
+@app.get("/api/scan/{job_id}/report.json")
+def scan_report_json(job_id: str, request: Request):
+    """Download a machine-readable JSON report for a completed scan."""
+    require_auth(request)
+    target, findings = _get_done_scan(job_id)
+    return Response(
+        content=json.dumps({"target": target, "findings": findings}, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition":
+                 f'attachment; filename="sentinelapi-{job_id[:8]}.json"'})
+
+
+@app.get("/api/scan/{job_id}/report.pdf")
+def scan_report_pdf(job_id: str, request: Request):
+    """Download a PDF report for a completed scan."""
+    require_auth(request)
+    target, findings = _get_done_scan(job_id)
+    pdf = _render_report_pdf(target, findings)
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="sentinelapi-{job_id[:8]}.pdf"'})
+
+
+@app.on_event("shutdown")
+def shutdown():
+    _executor.shutdown(wait=False, cancel_futures=True)

@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Athera Secure — Global Trust Network</title>
 <meta name="description" content="Athera Secure: Automated Zero-Trust API Vulnerability Scanner. Find broken access control and leaked data instantly." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%2300d2ff' d='M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z'/%3E%3Cpath fill='%23020617' d='M12 4.2 6.6 6.6v4.2c0 3.9 2.4 7.5 5.4 8.8 3-1.3 5.4-4.9 5.4-8.8V6.6L12 4.2z'/%3E%3C/svg%3E"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&family=Chakra+Petch:wght@400;600;700&display=swap" rel="stylesheet"/>
@@ -250,6 +251,21 @@
   .dashboard-layout .status { font-size: 10px; margin-top: 8px; }
   .dashboard-layout .hint { color: #64748b; font-size: 10px; margin-top: 6px; }
   .dashboard-layout .trust-pill { background: rgba(255,255,255,0.5); border: 1px solid rgba(2,132,199,0.3); color: #0284c7; font-weight: 900; }
+
+  .checks-box { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+  .checks-box label { display:inline-flex; align-items:center; gap:5px; font-size:10px; font-weight:700; color:#334155; background:rgba(255,255,255,0.6); border:1px solid rgba(2,132,199,0.25); padding:5px 10px; border-radius:999px; cursor:pointer; }
+  .checks-box input { accent-color:#0284c7; }
+
+  .api-key-box { margin-top:auto; padding-top:16px; border-top:1px solid rgba(255,255,255,0.12); }
+  .api-key-box label { display:block; font-size:10px; font-weight:800; color:#94a3b8; letter-spacing:.12em; text-transform:uppercase; margin-bottom:6px; }
+  .api-key-box input { width:100%; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.25); color:#e2e8f0; border-radius:8px; padding:8px 10px; font-size:11px; font-family:'JetBrains Mono',monospace; }
+  .api-key-box input::placeholder { color:#64748b; }
+  .api-key-box button { width:100%; margin-top:6px; padding:7px; border:none; border-radius:8px; background:#0284c7; color:#fff; font-size:11px; font-weight:700; cursor:pointer; }
+  .api-key-box .key-status { font-size:10px; color:#34d399; margin-top:6px; display:none; }
+
+  .row-actions a, .row-actions button { color:inherit; text-decoration:none; background:none; border:none; cursor:pointer; font-size:12px; font-weight:700; padding:2px 6px; border-radius:6px; }
+  .row-actions a:hover, .row-actions button:hover { background:rgba(2,132,199,0.12); }
+  .row-actions button.del { color:#e11d48; }
   
   .dynamic-results { margin-top: 40px; }
 
@@ -344,6 +360,12 @@
       <a href="#">⚙ Settings</a>
       <a href="#">? Support</a>
     </nav>
+    <div class="api-key-box">
+      <label for="apiKeyInput">API Key</label>
+      <input type="password" id="apiKeyInput" placeholder="SENTINEL_API_KEY" autocomplete="off"/>
+      <button id="saveApiKey">Save Key</button>
+      <div class="key-status" id="keyStatus">✓ Key saved</div>
+    </div>
   </aside>
 
   <div class="main-content">
@@ -370,6 +392,14 @@
           <input type="checkbox" id="consent"/>
           <span>I confirm ownership & authorization to establish technical credibility globally.</span>
         </label>
+
+        <div class="checks-box">
+          <label><input type="checkbox" class="check-opt" value="bola" checked/> BOLA/IDOR</label>
+          <label><input type="checkbox" class="check-opt" value="mass-assignment" checked/> Mass Assignment</label>
+          <label><input type="checkbox" class="check-opt" value="bfla" checked/> BFLA</label>
+          <label><input type="checkbox" class="check-opt" value="exposure" checked/> Data Exposure</label>
+          <label><input type="checkbox" class="check-opt" value="missing-auth" checked/> Broken Auth</label>
+        </div>
 
         <button class="scan-btn" id="scanBtn">
           <span class="lbl">Initialize Global Verification</span>
@@ -500,7 +530,7 @@ import * as THREE from 'three';
   const earthNightTex  = loader.load(texBase + 'earth-night.jpg');
   const earthDayTex    = loader.load(texBase + 'earth-blue-marble.jpg');
   const bumpTex        = loader.load(texBase + 'earth-topology.png');
-  const cloudTex       = loader.load(texBase + 'clouds.png');
+  const cloudTex       = loader.load(texBase + '../clouds/clouds.png');
   const specularTex    = loader.load(texBase + 'earth-water.png');
 
   // ── Earth sphere ──
@@ -1164,6 +1194,24 @@ const SEV = {
   LOW:      { cls: 'low',      color: '#00d2ff' }
 };
 
+function apiHeaders(json) {
+  const h = {};
+  if (json) h['Content-Type'] = 'application/json';
+  const key = localStorage.getItem('sentinel_api_key');
+  if (key) h['X-API-Key'] = key;
+  return h;
+}
+
+// API key persistence (used when SENTINEL_API_KEY is enforced server-side)
+$('apiKeyInput').value = localStorage.getItem('sentinel_api_key') || '';
+$('saveApiKey').addEventListener('click', () => {
+  const k = $('apiKeyInput').value.trim();
+  if (k) localStorage.setItem('sentinel_api_key', k);
+  else localStorage.removeItem('sentinel_api_key');
+  const s = $('keyStatus'); s.style.display = 'block';
+  setTimeout(() => s.style.display = 'none', 2500);
+});
+
 $('scanBtn').addEventListener('click', startScan);
 $('target').addEventListener('keydown', e => { if (e.key === 'Enter') startScan(); });
 
@@ -1221,16 +1269,21 @@ async function startScan() {
   }, 700);
 
   try {
+    const checks = [...document.querySelectorAll('.check-opt:checked')].map(c => c.value);
     const r = await fetch('/api/scan', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target, consent })
+      method: 'POST', headers: apiHeaders(true),
+      body: JSON.stringify({ target, consent, checks })
     });
     const data = await r.json();
     clearInterval(sInterval);
-    if (!r.ok) throw new Error(data.detail || 'API_DISCONNECT');
+    if (!r.ok) {
+      hide($('status')); btn.disabled = false; btn.classList.remove('loading');
+      showErr('SYS.ERR: ' + (data.detail || ('HTTP ' + r.status)));
+      return;
+    }
     poll(data.job_id);
   } catch (_) {
-    // ── Demo mode: simulated scan ──
+    // ── Demo mode: simulated scan (backend unreachable) ──
     setTimeout(() => {
       clearInterval(sInterval);
       hide($('status')); btn.disabled = false; btn.classList.remove('loading');
@@ -1261,7 +1314,7 @@ async function poll(jobId) {
   for (;;) {
     await new Promise(r => setTimeout(r, 1100));
     let data;
-    try { data = await (await fetch('/api/scan/' + jobId)).json(); } catch { continue; }
+    try { data = await (await fetch('/api/scan/' + jobId, { headers: apiHeaders() })).json(); } catch { continue; }
     if (data.status === 'queued' || data.status === 'running') {
       showStatus('Scanning: ' + data.target); continue;
     }
@@ -1331,10 +1384,43 @@ function renderStats(findings) {
 }
 
 function downloadCert() {
-  if (latestJobId) { window.location.href = '/api/scan/' + latestJobId + '/report'; return; }
+  if (latestJobId) { downloadReport(latestJobId, 'html'); return; }
   alert('Run a scan first to generate your security report badge.');
 }
 window.downloadCert = downloadCert; // expose for the inline onclick (module scope)
+
+async function downloadReport(jobId, format) {
+  const path = '/api/scan/' + jobId + (format === 'html' ? '/report' : '/report.' + format);
+  try {
+    const r = await fetch(path, { headers: apiHeaders() });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); alert('Download failed: ' + (e.detail || r.status)); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'sentinelapi-' + jobId.slice(0, 8) + '.' + format;
+    a.click(); URL.revokeObjectURL(url);
+  } catch { alert('Download failed: network error'); }
+}
+window.downloadReport = downloadReport;
+
+async function deleteScan(jobId) {
+  if (!confirm('Delete this scan from history?')) return;
+  try {
+    const r = await fetch('/api/scan/' + jobId, { method: 'DELETE', headers: apiHeaders() });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); alert('Delete failed: ' + (e.detail || r.status)); return; }
+    loadHistory();
+  } catch { alert('Delete failed: network error'); }
+}
+window.deleteScan = deleteScan;
+
+async function cancelScan(jobId) {
+  try {
+    const r = await fetch('/api/scan/' + jobId + '/cancel', { method: 'POST', headers: apiHeaders() });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); alert('Cancel failed: ' + (e.detail || r.status)); return; }
+    loadHistory();
+  } catch { alert('Cancel failed: network error'); }
+}
+window.cancelScan = cancelScan;
 
 /* ============================================================
    REAL DASHBOARD DATA (wired to /api/scans)
@@ -1343,7 +1429,7 @@ let latestJobId = null;
 
 async function loadHistory() {
   try {
-    const d = await (await fetch('/api/scans')).json();
+    const d = await (await fetch('/api/scans', { headers: apiHeaders() })).json();
     const scans = d.scans || [];
     const done = scans.filter(s => s.status === 'done');
     if (done.length) latestJobId = done[0].job_id;
@@ -1378,12 +1464,23 @@ function renderRecentDetections(done) {
 
 function renderScanHistory(scans) {
   const el = $('scanHistory'); if (!el) return;
-  const html = scans.slice(0, 5).map(s =>
-    `<tr><td>${esc(s.target)}</td><td>${new Date(s.created_at * 1000).toLocaleDateString()}</td>` +
-    `<td>${s.status === 'done' ? (s.findings + ' findings') : esc(s.status)}</td>` +
-    `<td style="cursor:pointer;color:var(--accent);">` +
-    (s.status === 'done' ? `<a href="/api/scan/${s.job_id}/report" style="color:inherit;text-decoration:none;">Report ⭳</a>` : '—') +
-    `</td></tr>`).join('');
+  const html = scans.slice(0, 8).map(s => {
+    let actions = '';
+    if (s.status === 'done') {
+      actions = `<span class="row-actions">` +
+        `<a href="#" onclick="downloadReport('${s.job_id}','html');return false;">HTML</a> · ` +
+        `<a href="#" onclick="downloadReport('${s.job_id}','json');return false;">JSON</a> · ` +
+        `<a href="#" onclick="downloadReport('${s.job_id}','pdf');return false;">PDF</a> · ` +
+        `<button class="del" onclick="deleteScan('${s.job_id}')">✕</button></span>`;
+    } else if (s.status === 'queued' || s.status === 'running') {
+      actions = `<span class="row-actions"><button onclick="cancelScan('${s.job_id}')">Cancel</button></span>`;
+    } else {
+      actions = `<span style="color:#94a3b8;">${esc(s.status)}</span>`;
+    }
+    return `<tr><td>${esc(s.target)}</td><td>${new Date(s.created_at * 1000).toLocaleDateString()}</td>` +
+      `<td>${s.status === 'done' ? (s.findings + ' findings') : esc(s.status)}</td>` +
+      `<td style="color:var(--accent);">${actions}</td></tr>`;
+  }).join('');
   if (html) el.innerHTML = `<tr><th>Endpoint</th><th>Date</th><th>Duration</th><th>Action</th></tr>` + html;
 }
 

@@ -23,7 +23,19 @@ type finding struct {
 
 var severityOrder = map[string]int{"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
 
+func allChecks() map[string]bool {
+	m := map[string]bool{}
+	for k := range checkNames {
+		m[k] = true
+	}
+	return m
+}
+
 func run(base, outJSON, outHTML string) error {
+	return runWithChecks(base, outJSON, outHTML, allChecks())
+}
+
+func runWithChecks(base, outJSON, outHTML string, checks map[string]bool) error {
 	client := &http.Client{Timeout: 10e9} // 10s
 	base = strings.TrimRight(base, "/")
 
@@ -56,18 +68,24 @@ func run(base, outJSON, outHTML string) error {
 	var findings []finding
 	seenBola := map[string]bool{}
 	for _, ep := range endpoints {
-		findings = append(findings, checkBola(client, base, ep, userA, userB, aToken, seenBola)...)
-		findings = append(findings, checkMassAssignment(client, base, ep, aToken)...)
-		findings = append(findings, checkBFLA(client, base, ep, aToken)...)
+		if checks["bola"] {
+			findings = append(findings, checkBola(client, base, ep, userA, userB, aToken, seenBola)...)
+		}
+		if checks["mass-assignment"] {
+			findings = append(findings, checkMassAssignment(client, base, ep, aToken)...)
+		}
+		if checks["bfla"] {
+			findings = append(findings, checkBFLA(client, base, ep, aToken)...)
+		}
 
 		_, hasSchema := schemaPaths(ep.Op)
 		if hasSchema || opHasSecurity(ep.Op) {
 			// baseline = a 200 response for A's own resource (or direct call)
 			filled, body := resolveBaseline(client, base, ep, userA, aToken)
-			if hasSchema && filled != "" && body != nil {
+			if checks["exposure"] && hasSchema && filled != "" && body != nil {
 				findings = append(findings, checkExposure(ep, body, base, filled, aToken)...)
 			}
-			if opHasSecurity(ep.Op) && filled != "" {
+			if checks["missing-auth"] && opHasSecurity(ep.Op) && filled != "" {
 				findings = append(findings, checkMissingAuth(client, ep, base, filled)...)
 			}
 		}
