@@ -18,7 +18,13 @@ Run:  uvicorn vuln_api.main:app --port 8000
 """
 from __future__ import annotations
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException
+import base64
+import hashlib
+import hmac
+import json
+import urllib.request
+
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Response
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
@@ -40,6 +46,17 @@ async def _leak_server_header(request, call_next):
     response.headers["X-Powered-By"] = "SentinelBank/1.0"
     return response
 
+
+@app.middleware("http")
+async def _permissive_cors(request, call_next):
+    """FLAW: reflects any Origin with credentials — CORS misconfiguration."""
+    response = await call_next(request)
+    origin = request.headers.get("origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
+
 # ---------------------------------------------------------------------------
 # In-memory "database"
 # ---------------------------------------------------------------------------
@@ -48,6 +65,50 @@ _ORDERS: dict[int, dict] = {}
 _POSTS: dict[int, dict] = {}
 _ADMIN_TOKENS: set[str] = set()
 _next_id = 1
+
+# ---------------------------------------------------------------------------
+# JWT helpers (FLAW: weak signing secret + accepted alg:none)
+# ---------------------------------------------------------------------------
+_JWT_SECRET = "secret"
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _sign_jwt(payload: dict) -> str:
+    header = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    body = _b64url(json.dumps(payload).encode())
+    sig = hmac.new(_JWT_SECRET.encode(), f"{header}.{body}".encode(), hashlib.sha256).digest()
+    return f"{header}.{body}.{_b64url(sig)}"
+
+
+def _verify_jwt(token: str):
+    """Verify a JWT. FLAW: trusts alg:none and uses a weak, known secret."""
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+
+    def pad(s: str) -> str:
+        return s + "=" * (-len(s) % 4)
+
+    try:
+        header = json.loads(base64.urlsafe_b64decode(pad(parts[0])))
+        payload = json.loads(base64.urlsafe_b64decode(pad(parts[1])))
+    except Exception:
+        return None
+    if header.get("alg") == "none":
+        return payload  # FLAW: no signature verification
+    if header.get("alg") != "HS256":
+        return None
+    expected = hmac.new(_JWT_SECRET.encode(), f"{parts[0]}.{parts[1]}".encode(), hashlib.sha256).digest()
+    try:
+        provided = base64.urlsafe_b64decode(pad(parts[2]))
+    except Exception:
+        return None
+    if not hmac.compare_digest(expected, provided):
+        return None
+    return payload
 
 
 class RegisterBody(BaseModel):
@@ -299,3 +360,74 @@ def debug_info():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# NEW FLAWS for the extended scanner (JWT / SQLi / NoSQLi / SSRF / GraphQL)
+# ---------------------------------------------------------------------------
+
+@app.post("/login")
+def login(body: dict = Body(default={})):
+    """FLAW: issues JWTs signed with a weak, guessable HMAC secret (no expiry)."""
+    username = body.get("username", "alice")
+    token = _sign_jwt({"sub": username, "username": username, "role": "user"})
+    return {"token": token, "username": username}
+
+
+@app.get("/me", dependencies=[Depends(_api_key)])
+def me(authorization: str = Header(default="")):
+    """FLAW: accepts alg:none JWTs and JWTs signed with the weak secret."""
+    payload = _verify_jwt(authorization.removeprefix("Bearer "))
+    if payload is None:
+        raise HTTPException(status_code=401, detail="invalid token")
+    return {"sub": payload.get("sub"), "username": payload.get("username"), "role": payload.get("role")}
+
+
+@app.get("/search")
+def search(q: str = ""):
+    """FLAW: SQL injection (error-based) and NoSQL injection (operator-based)."""
+    # NoSQL operator injection first — the payload is a JSON document.
+    try:
+        filt = json.loads(q)
+    except Exception:
+        filt = None
+    if isinstance(filt, dict) and any(k.startswith("$") for k in filt):
+        return {"results": [{"id": u["id"], "username": u["username"]} for u in _USERS.values()]}
+    # SQL injection — quotes are concatenated into a naive query.
+    if "'" in q or '"' in q:
+        raise HTTPException(
+            status_code=500,
+            detail=f'sqlite3.OperationalError: near "{q[:1] or chr(39)}": syntax error',
+        )
+    if any(x in q.upper().replace(" ", "") for x in ["OR'1'='1", "1=1"]):
+        return {"results": [{"id": u["id"], "username": u["username"]} for u in _USERS.values()]}
+    return {"results": [{"id": u["id"], "username": u["username"]} for u in _USERS.values() if u["username"] == q]}
+
+
+@app.get("/fetch")
+def fetch(url: str = ""):
+    """FLAW: SSRF — fetches an arbitrary URL server-side and returns its body."""
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            data = r.read(65536)
+        return Response(content=data, media_type="application/json")
+    except Exception as exc:  # noqa: BLE001 — reflect the error
+        return Response(content=str(exc).encode(), media_type="text/plain")
+
+
+@app.post("/graphql")
+def graphql(body: dict = Body(default={})):
+    """FLAW: GraphQL introspection enabled with no depth/alias limits."""
+    query = body.get("query", "")
+    if not query:
+        raise HTTPException(status_code=400, detail="query required")
+    if "__schema" in query:
+        return {
+            "data": {"__schema": {
+                "queryType": {"name": "Query"},
+                "types": [{"name": "User"}, {"name": "Order"}, {"name": "Post"}],
+            }}
+        }
+    return {"data": {"health": "ok"}}

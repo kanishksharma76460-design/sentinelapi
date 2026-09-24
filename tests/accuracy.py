@@ -45,6 +45,16 @@ BANK_TRUTH = {
     ("LOW", "Security Misconfiguration", "ALL", None),
     ("MEDIUM", "Missing Rate Limiting", "ALL", None),
     ("HIGH", "Exposed Debug Endpoint", "GET /debug", None),
+    ("CRITICAL", "JWT Signature Not Verified (alg:none)", "GET /me", None),
+    ("HIGH", "Weak JWT Signing Secret", "GET /me", None),
+    ("LOW", "JWT Has No Expiry", "ALL", None),
+    ("HIGH", "SQL Injection", "GET /search?q=", None),
+    ("HIGH", "NoSQL Injection", "GET /search?q=", None),
+    ("HIGH", "CORS Misconfiguration (credentialed reflection)", "GET /", None),
+    ("HIGH", "Server-Side Request Forgery (SSRF)", "GET /fetch?url=", None),
+    ("MEDIUM", "GraphQL Introspection Enabled", "POST /graphql", None),
+    ("MEDIUM", "Undocumented Endpoint", "GET /docs", None),
+    ("MEDIUM", "Undocumented Endpoint", "GET /redoc", None),
 }
 
 LIBRARY_TRUTH = {
@@ -56,6 +66,8 @@ LIBRARY_TRUTH = {
     ("LOW", "Security Misconfiguration", "ALL", None),
     ("MEDIUM", "Missing Rate Limiting", "ALL", None),
     ("HIGH", "Exposed Debug Endpoint", "GET /debug", None),
+    ("MEDIUM", "Undocumented Endpoint", "GET /docs", None),
+    ("MEDIUM", "Undocumented Endpoint", "GET /redoc", None),
 }
 
 TARGETS = [

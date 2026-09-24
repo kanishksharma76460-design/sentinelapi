@@ -39,21 +39,21 @@ func runWithChecks(base, outJSON, outHTML string, checks map[string]bool) error 
 	client := &http.Client{Timeout: 10e9} // 10s
 	base = strings.TrimRight(base, "/")
 
-	spec, err := fetchSpec(client, base)
-	if err != nil {
-		return err
+	spec, _ := fetchSpec(client, base)
+	if spec == nil {
+		fmt.Println("[*] no OpenAPI spec found — running spec-independent checks only")
 	}
-	userA, err := registerUser(client, base, "alice")
-	if err != nil {
-		return err
-	}
-	userB, err := registerUser(client, base, "bob")
-	if err != nil {
-		return err
-	}
-	fmt.Printf("[*] registered alice (id=%v) and bob (id=%v)\n", userA["id"], userB["id"])
 
-	endpoints := allEndpoints(spec)
+	userA, _ := registerUser(client, base, "alice")
+	userB, _ := registerUser(client, base, "bob")
+	if userA != nil && userB != nil {
+		fmt.Printf("[*] registered alice (id=%v) and bob (id=%v)\n", userA["id"], userB["id"])
+	}
+
+	var endpoints []endpoint
+	if spec != nil {
+		endpoints = allEndpoints(spec)
+	}
 	// deterministic order for reproducible output
 	sort.Slice(endpoints, func(i, j int) bool {
 		if endpoints[i].Path == endpoints[j].Path {
@@ -63,7 +63,10 @@ func runWithChecks(base, outJSON, outHTML string, checks map[string]bool) error 
 	})
 	fmt.Printf("[*] found %d operation(s)\n", len(endpoints))
 
-	aToken, _ := userA["token"].(string)
+	var aToken string
+	if userA != nil {
+		aToken, _ = userA["token"].(string)
+	}
 
 	var findings []finding
 	seenBola := map[string]bool{}
@@ -100,6 +103,24 @@ func runWithChecks(base, outJSON, outHTML string, checks map[string]bool) error 
 	}
 	if checks["debug-endpoints"] {
 		findings = append(findings, checkDebugEndpoints(client, base)...)
+	}
+	if checks["jwt"] {
+		findings = append(findings, checkJWT(client, base)...)
+	}
+	if checks["sqli"] {
+		findings = append(findings, checkSQLi(client, base, endpoints)...)
+	}
+	if checks["cors"] {
+		findings = append(findings, checkCORS(client, base, endpoints)...)
+	}
+	if checks["ssrf"] {
+		findings = append(findings, checkSSRF(client, base, endpoints)...)
+	}
+	if checks["graphql"] {
+		findings = append(findings, checkGraphQL(client, base)...)
+	}
+	if checks["spec-audit"] {
+		findings = append(findings, checkSpecAudit(spec, client, base)...)
 	}
 
 	sort.SliceStable(findings, func(i, j int) bool {

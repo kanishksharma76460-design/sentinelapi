@@ -121,12 +121,12 @@ def main() -> int:
                 print("scan error:", st["error"])
                 return 1
         print("findings:", len(findings))
-        assert len(findings) == 22, f"expected 22 findings, got {len(findings)}"
+        assert len(findings) == 32, f"expected 32 findings, got {len(findings)}"
 
         # 5. JSON report download
         s, body = request("GET", BK_BASE + f"/api/scan/{job_id}/report.json")
         assert s == 200, body
-        assert len(body.get("findings", [])) == 22, "JSON report findings mismatch"
+        assert len(body.get("findings", [])) == 32, "JSON report findings mismatch"
 
         # 6. PDF report download
         req = urllib.request.Request(
@@ -134,6 +134,32 @@ def main() -> int:
         with urllib.request.urlopen(req, timeout=10) as r:
             pdf = r.read()
         assert pdf[:4] == b"%PDF", "PDF report does not start with %PDF"
+
+        # 6b. SARIF + CSV report download
+        s, body = request("GET", BK_BASE + f"/api/scan/{job_id}/report.sarif")
+        assert s == 200, body
+        assert body.get("version") == "2.1.0", "SARIF report missing version"
+        assert len(body.get("runs", [{}])[0].get("results", [])) == 32, "SARIF results mismatch"
+        req2 = urllib.request.Request(
+            BK_BASE + f"/api/scan/{job_id}/report.csv")
+        with urllib.request.urlopen(req2, timeout=10) as r:
+            csv = r.read().decode()
+        assert csv.startswith("severity,title,endpoint"), "CSV report header mismatch"
+
+        # 6c. regression diff
+        s, body = request("POST", BK_BASE + "/api/scan",
+                          {"target": API_BASE, "consent": True})
+        assert s == 200, body
+        job2 = body["job_id"]
+        for _ in range(30):
+            time.sleep(1)
+            _, st = request("GET", BK_BASE + f"/api/scan/{job2}")
+            if st["status"] == "done":
+                break
+        s, diff = request("GET", BK_BASE + f"/api/scan/{job2}/diff")
+        assert s == 200, diff
+        assert diff["baseline"] == job_id, "diff baseline should be the first scan"
+        assert diff["new_count"] == 0 and diff["unchanged"] == 32, diff
 
         # 7. invalid checks rejected
         s, body = request("POST", BK_BASE + "/api/scan",
@@ -149,8 +175,8 @@ def main() -> int:
         s, _ = request("GET", BK_BASE + f"/api/scan/{job_id}")
         assert s == 404, "deleted scan still fetchable"
 
-        print("RESULT: PASS ✅  (health, consent, SSRF, 22 findings, "
-              "JSON+PDF reports, check validation, delete)")
+        print("RESULT: PASS ✅  (health, consent, SSRF, 32 findings, "
+              "JSON+PDF+SARIF+CSV reports, diff, check validation, delete)")
         return 0
     finally:
         bk.terminate(); bk.wait()

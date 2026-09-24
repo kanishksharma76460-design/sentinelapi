@@ -5,7 +5,8 @@ import Logo from './components/Logo.jsx'
 import SynthGrid from './components/SynthGrid.jsx'
 import {
   ALL_CHECKS, DEMO_TARGET, OWASP, SEV,
-  startScan, getScan, listScans, getHealth, cancelScan, deleteScan, reportUrl
+  startScan, getScan, listScans, getHealth, cancelScan, deleteScan, reportUrl,
+  getDiff, wsUrl, authStatus, login, logout, hasSession
 } from './api.js'
 
 const STAGES = ['TARGETING', 'PROBING', 'EXPLOITING', 'GRADING']
@@ -66,7 +67,15 @@ export default function App() {
   const [bootLine, setBootLine] = useState(0)
   const [health, setHealth] = useState(null)
   const [webhookUrl, setWebhookUrl] = useState('')
+  const [diff, setDiff] = useState(null)
+  const [lastJobId, setLastJobId] = useState(null)
+  const [needsLogin, setNeedsLogin] = useState(false)
+  const [sessionOn, setSessionOn] = useState(hasSession())
+  const [loginUser, setLoginUser] = useState('')
+  const [loginPass, setLoginPass] = useState('')
+  const [loginError, setLoginError] = useState('')
   const termRef = useRef(null)
+  const wsRef = useRef(null)
 
   function finishBoot() {
     setBooted(true)
@@ -76,6 +85,11 @@ export default function App() {
   useEffect(() => { loadHistory() }, [])
   useEffect(() => {
     getHealth().then(setHealth).catch(() => setHealth({ engine: false }))
+  }, [])
+  useEffect(() => {
+    authStatus().then(s => {
+      if (s.login_required && !hasSession()) setNeedsLogin(true)
+    }).catch(() => {})
   }, [])
   useEffect(() => { const t = setTimeout(finishBoot, 2100); return () => clearTimeout(t) }, [])
   useEffect(() => {
@@ -106,6 +120,25 @@ export default function App() {
     else localStorage.removeItem('sentinel_api_key')
   }
 
+  async function doLogin() {
+    setLoginError('')
+    try {
+      await login(loginUser.trim(), loginPass)
+      setNeedsLogin(false)
+      setSessionOn(true)
+      loadHistory()
+    } catch (e) {
+      setLoginError(e.message)
+    }
+  }
+
+  function doLogout() {
+    logout()
+    setSessionOn(false)
+    if (needsLogin) setNeedsLogin(true)
+    else window.location.reload()
+  }
+
   function showTerminal() {
     setLogs([])
     setStage(0)
@@ -118,13 +151,29 @@ export default function App() {
     ])
   }
 
+  function attachWS(jobId) {
+    try {
+      const ws = new WebSocket(wsUrl(jobId))
+      wsRef.current = ws
+      ws.onmessage = ev => {
+        if (ev.data.startsWith('__DONE__:')) return
+        setLogs(prev => [...prev, ev.data])
+      }
+      ws.onerror = () => { wsRef.current = null }
+      ws.onclose = () => { wsRef.current = null }
+    } catch {
+      wsRef.current = null
+    }
+  }
+
   async function poll(jobId) {
+    attachWS(jobId)
     for (;;) {
       await new Promise(r => setTimeout(r, 700))
       let data
       try { data = await getScan(jobId) } catch { continue }
-      if (data.logs && data.logs.length) {
-        // append only new lines
+      if (!wsRef.current && data.logs && data.logs.length) {
+        // WebSocket fallback: sync logs from polling
         setLogs(prev => {
           const base = prev.filter(l => l.startsWith('>>'))
           return [...base, ...data.logs]
@@ -135,15 +184,19 @@ export default function App() {
         continue
       }
       if (data.status === 'error') {
+        if (wsRef.current) wsRef.current.close()
         setScanning(false)
         setError(data.error || 'scan failed')
         return
       }
+      if (wsRef.current) wsRef.current.close()
       setStage(3)
       setFindings(data.findings)
       setGrade(data.grade)
+      setLastJobId(jobId)
       setScanning(false)
       loadHistory()
+      try { setDiff(await getDiff(jobId)) } catch { setDiff(null) }
       return
     }
   }
@@ -203,6 +256,21 @@ export default function App() {
         </div>
       )}
 
+      {needsLogin && (
+        <div className="login-overlay">
+          <div className="login-card bracket">
+            <div className="login-logo"><Logo size={58} /></div>
+            <div className="login-title">AUTHENTICATION REQUIRED</div>
+            <input type="text" value={loginUser} onChange={e => setLoginUser(e.target.value)}
+              placeholder="username" autoFocus spellCheck={false} />
+            <input type="password" value={loginPass} onChange={e => setLoginPass(e.target.value)}
+              placeholder="password" onKeyDown={e => e.key === 'Enter' && doLogin()} />
+            <button className="btn" onClick={doLogin}>Authenticate</button>
+            {loginError && <div className="error">{loginError}</div>}
+          </div>
+        </div>
+      )}
+
       {/* ── Nav ── */}
       <nav className="nav">
         <div className="logo">
@@ -213,6 +281,7 @@ export default function App() {
           <a href="#scan">Scan</a>
           <a href="#results">Results</a>
           <a href="#history">History</a>
+          {sessionOn && <button onClick={doLogout}>Logout</button>}
           <input
             type="password"
             value={apiKey}
@@ -330,6 +399,16 @@ export default function App() {
             </div>
           </div>
 
+          {diff && diff.baseline && (diff.new_count > 0 || diff.fixed_count > 0) && (
+            <div className="diff-banner">
+              <b>Regression diff</b>
+              <span className="diff-new">+{diff.new_count} new</span>
+              <span className="diff-fixed">−{diff.fixed_count} fixed</span>
+              <span className="diff-same">{diff.unchanged} unchanged</span>
+              <span className="diff-sub">vs previous scan of this target</span>
+            </div>
+          )}
+
           {findings.length ? (
             <>
               <div className="section">
@@ -376,6 +455,8 @@ export default function App() {
                     <a href={reportUrl(s.job_id, 'html')}>HTML</a>
                     <a href={reportUrl(s.job_id, 'json')}>JSON</a>
                     <a href={reportUrl(s.job_id, 'pdf')}>PDF</a>
+                    <a href={reportUrl(s.job_id, 'sarif')}>SARIF</a>
+                    <a href={reportUrl(s.job_id, 'csv')}>CSV</a>
                   </>
                 )}
                 {(s.status === 'queued' || s.status === 'running') && (

@@ -28,6 +28,10 @@ history in SQLite. Set ALLOW_PRIVATE_SCAN=1 only for local development.
 """
 from __future__ import annotations
 
+import asyncio
+import base64
+import hashlib
+import hmac
 import ipaddress
 import json
 import logging
@@ -45,7 +49,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -66,9 +70,13 @@ MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "4"))
 SCAN_TIMEOUT = int(os.environ.get("SCAN_TIMEOUT_SECONDS", "120"))
 CORS_ORIGINS = [o.strip() for o in os.environ.get(
     "CORS_ORIGINS", "*").split(",") if o.strip()]
+DASH_USER = os.environ.get("SENTINEL_USER", "admin")
+DASH_PASSWORD = os.environ.get("SENTINEL_PASSWORD", "").strip()
+SESSION_SECRET = os.environ.get("SENTINEL_SESSION_SECRET", "athera-session-secret")
 
 VALID_CHECKS = {"bola", "mass-assignment", "bfla", "exposure", "missing-auth",
-                "security-misconfig", "rate-limit", "debug-endpoints"}
+                "security-misconfig", "rate-limit", "debug-endpoints",
+                "jwt", "sqli", "cors", "ssrf", "graphql", "spec-audit"}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -175,18 +183,57 @@ def validate_checks(checks: list[str] | None) -> list[str] | None:
 
 
 # ---- auth / rate-limit -----------------------------------------------------
+def _b64u(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _b64d(s: str) -> bytes:
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+
+def _sign_session(payload: dict) -> str:
+    header = _b64u(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    body = _b64u(json.dumps(payload).encode())
+    sig = hmac.new(SESSION_SECRET.encode(), f"{header}.{body}".encode(),
+                   hashlib.sha256).digest()
+    return f"{header}.{body}.{_b64u(sig)}"
+
+
+def _verify_session(token: str) -> dict | None:
+    try:
+        h, b, s = token.split(".")
+    except ValueError:
+        return None
+    expected = hmac.new(SESSION_SECRET.encode(), f"{h}.{b}".encode(),
+                        hashlib.sha256).digest()
+    try:
+        if not hmac.compare_digest(expected, _b64d(s)):
+            return None
+        payload = json.loads(_b64d(b))
+    except Exception:
+        return None
+    if payload.get("exp", 0) < time.time():
+        return None
+    return payload
+
+
 def require_auth(request: Request) -> None:
-    """Enforce API-key auth when SENTINEL_API_KEY is configured."""
-    if not API_KEY:
-        return
+    """Auth: dashboard session JWT (when SENTINEL_PASSWORD set) or API key."""
+    if not API_KEY and not DASH_PASSWORD:
+        return  # open mode
     auth = request.headers.get("authorization", "")
-    provided = ""
     if auth.startswith("Bearer "):
-        provided = auth[7:].strip()
-    else:
-        provided = request.headers.get("x-api-key", "").strip()
-    if not provided or not secrets.compare_digest(provided, API_KEY):
-        raise HTTPException(401, "missing or invalid API key")
+        token = auth[7:].strip()
+        if DASH_PASSWORD and _verify_session(token):
+            return
+        if API_KEY and secrets.compare_digest(token, API_KEY):
+            return
+    provided = request.headers.get("x-api-key", "").strip()
+    if API_KEY and provided and secrets.compare_digest(provided, API_KEY):
+        return
+    if DASH_PASSWORD:
+        raise HTTPException(401, "login required — POST /api/auth/login")
+    raise HTTPException(401, "missing or invalid API key")
 
 
 _rate_hits: dict[str, list[float]] = {}
@@ -314,13 +361,34 @@ def run_scan(job_id: str, target: str, checks: list[str] | None,
 
 
 # ---- routes ----------------------------------------------------------------
+@app.get("/api/auth/status")
+def auth_status():
+    return {"login_required": bool(DASH_PASSWORD), "api_key_required": bool(API_KEY)}
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/login")
+def auth_login(req: LoginRequest):
+    if not DASH_PASSWORD:
+        raise HTTPException(400, "dashboard login is not configured")
+    if req.username != DASH_USER or not secrets.compare_digest(req.password, DASH_PASSWORD):
+        raise HTTPException(401, "invalid credentials")
+    token = _sign_session({"sub": req.username, "exp": int(time.time()) + 86400})
+    return {"token": token, "username": req.username, "expires_in": 86400}
+
+
 @app.get("/api/health")
 def health():
     return {
         "status": "ok",
         "version": app.version,
         "engine": ENGINE_BIN.exists(),
-        "auth_enforced": bool(API_KEY),
+        "auth_enforced": bool(API_KEY) or bool(DASH_PASSWORD),
+        "login_required": bool(DASH_PASSWORD),
         "rate_limit_per_minute": RATE_LIMIT_PER_MINUTE,
     }
 
@@ -630,6 +698,139 @@ def scan_report_pdf(job_id: str, request: Request):
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition":
                  f'attachment; filename="sentinelapi-{job_id[:8]}.pdf"'})
+
+
+# ---- SARIF / CSV export ----------------------------------------------------
+def _render_report_sarif(target: str, findings: list) -> dict:
+    rules = []
+    rule_index: dict[str, int] = {}
+    for f in findings:
+        title = f.get("title", "Unknown")
+        if title not in rule_index:
+            rule_index[title] = len(rules)
+            rules.append({
+                "id": "SENT" + str(len(rules) + 1).zfill(4),
+                "name": title,
+                "shortDescription": {"text": title},
+            })
+    results = []
+    for f in findings:
+        rid = rules[rule_index[f.get("title", "Unknown")]]["id"]
+        results.append({
+            "ruleId": rid,
+            "level": {"CRITICAL": "error", "HIGH": "error",
+                      "MEDIUM": "warning", "LOW": "note"}.get(
+                          f.get("severity", "LOW"), "note"),
+            "message": {"text": f.get("detail", "")},
+            "locations": [{"physicalLocation": {
+                "artifactLocation": {"uri": f.get("endpoint", "")}}}],
+            "properties": {
+                "severity": f.get("severity", "LOW"),
+                "reproduction": f.get("reproduction", ""),
+            },
+        })
+    return {
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {
+                "name": "SentinelAPI", "version": app.version,
+                "informationUri": "https://athera-secure-production.up.railway.app",
+                "rules": rules,
+            }},
+            "results": results,
+        }],
+    }
+
+
+def _render_report_csv(target: str, findings: list) -> str:
+    import csv as _csv
+    from io import StringIO
+    buf = StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["severity", "title", "endpoint", "detail", "reproduction"])
+    for f in findings:
+        w.writerow([f.get("severity", ""), f.get("title", ""),
+                    f.get("endpoint", ""), f.get("detail", ""),
+                    f.get("reproduction", "")])
+    return buf.getvalue()
+
+
+@app.get("/api/scan/{job_id}/report.sarif")
+def scan_report_sarif(job_id: str, request: Request):
+    """Download a SARIF 2.1.0 report (GitHub Code Scanning compatible)."""
+    require_auth(request)
+    target, findings = _get_done_scan(job_id)
+    return Response(
+        content=json.dumps(_render_report_sarif(target, findings), indent=2),
+        media_type="application/sarif+json",
+        headers={"Content-Disposition":
+                 f'attachment; filename="sentinelapi-{job_id[:8]}.sarif"'})
+
+
+@app.get("/api/scan/{job_id}/report.csv")
+def scan_report_csv(job_id: str, request: Request):
+    """Download a CSV report."""
+    require_auth(request)
+    target, findings = _get_done_scan(job_id)
+    return Response(
+        content=_render_report_csv(target, findings), media_type="text/csv",
+        headers={"Content-Disposition":
+                 f'attachment; filename="sentinelapi-{job_id[:8]}.csv"'})
+
+
+# ---- scan diff / regression ------------------------------------------------
+@app.get("/api/scan/{job_id}/diff")
+def scan_diff(job_id: str, request: Request):
+    """Compare a scan against the previous completed scan of the same target."""
+    require_auth(request)
+    target, findings = _get_done_scan(job_id)
+    with _lock:
+        row = _conn.execute(
+            "SELECT id, findings FROM scans WHERE target=? AND status='done'"
+            " AND id != ? ORDER BY created_at DESC LIMIT 1",
+            (target, job_id)).fetchone()
+
+    def key(f):
+        return (f.get("title", ""), f.get("endpoint", ""))
+
+    if row is None:
+        return {"job_id": job_id, "baseline": None,
+                "new": [], "fixed": [], "new_count": 0, "fixed_count": 0,
+                "unchanged": len(findings)}
+
+    prev = json.loads(row[1]) if row[1] else []
+    prev_keys = {key(f) for f in prev}
+    curr_keys = {key(f) for f in findings}
+    new = [f for f in findings if key(f) not in prev_keys]
+    fixed = [f for f in prev if key(f) not in curr_keys]
+    return {"job_id": job_id, "baseline": row[0],
+            "new": new, "fixed": fixed,
+            "new_count": len(new), "fixed_count": len(fixed),
+            "unchanged": len(findings) - len(new)}
+
+
+# ---- WebSocket live log streaming ------------------------------------------
+@app.websocket("/api/scan/{job_id}/ws")
+async def scan_ws(websocket: WebSocket, job_id: str):
+    await websocket.accept()
+    sent = 0
+    try:
+        while True:
+            logs = list(_job_logs.get(job_id, []))
+            if len(logs) > sent:
+                for line in logs[sent:]:
+                    await websocket.send_text(line)
+                sent = len(logs)
+            with _lock:
+                row = _conn.execute(
+                    "SELECT status FROM scans WHERE id=?", (job_id,)).fetchone()
+            if row and row[0] in ("done", "error", "cancelled"):
+                await websocket.send_text("__DONE__:" + row[0])
+                break
+            await asyncio.sleep(0.5)
+    except WebSocketDisconnect:
+        pass
 
 
 @app.on_event("shutdown")
