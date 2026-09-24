@@ -21,5 +21,11 @@ scanner/report.html
 *.snm
 *.vrb
 
+# Docs & papers (kept local, not on GitHub)
+*.pdf
+*.tex
+final/
+research/
+
 # OS / editor
 .DS_Store
