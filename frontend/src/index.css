@@ -131,18 +131,35 @@ body::after {
 .gate-term-sub { font-family: var(--mono); font-size: 12px; color: var(--dim); }
 .gate-btn.restore { color: var(--cyan); border-color: var(--cyan); }
 
-/* robot face */
+/* robot face — geometric gateway core (φ-proportioned) */
 .robot-face { filter: drop-shadow(0 0 26px rgba(57,255,20,.35)); }
-.robot-face .rf-aura { animation: auraPulse 3s ease-in-out infinite; }
-@keyframes auraPulse { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
-.robot-face .rf-eye { animation: rfBlink 4.2s infinite; transform-origin: 120px 112px; }
-@keyframes rfBlink { 0%, 92%, 100% { opacity: 1; transform: scaleY(1); } 95%, 97% { opacity: .12; transform: scaleY(.08); } }
-.robot-face .rf-antenna { animation: blink 1.6s infinite; }
-.robot-face.power .rf-eye { animation: none; opacity: 1; }
-.robot-face.power .rf-mouth rect { animation: blink .3s infinite; }
-.robot-face.off .rf-eye { opacity: .1; }
-.robot-face.off .rf-aura { opacity: 0; }
-.robot-face.off .rf-antenna { opacity: .15; }
+.robot-face .rg-aura { animation: auraPulse 3s ease-in-out infinite; }
+@keyframes auraPulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+.robot-face .rg-ticks .tick { stroke: rgba(57,255,20,.28); stroke-width: 1; }
+.robot-face .rg-ticks .tick.major { stroke: rgba(251,191,36,.6); stroke-width: 1.4; }
+.robot-face .rg-hex1 { fill: rgba(57,255,20,.03); stroke: #39ff14; stroke-width: 2; }
+.robot-face .rg-hex1b { fill: none; stroke: rgba(57,255,20,.25); stroke-width: 1; }
+.robot-face .rg-hex2 { fill: none; stroke: rgba(57,255,20,.5); stroke-width: 1.4; stroke-dasharray: 7 5; }
+.robot-face .rg-hex3 { fill: none; stroke: rgba(251,191,36,.4); stroke-width: 1; stroke-dasharray: 3 7; }
+.robot-face .rg-hex4 { fill: rgba(57,255,20,.05); stroke: rgba(57,255,20,.4); stroke-width: 1; }
+.robot-face .rg-goldring { fill: none; stroke: url(#rg-gold); stroke-width: 1.6; opacity: .85; }
+.robot-face .rg-spin { transform-box: fill-box; transform-origin: center; animation: rgRotate 26s linear infinite; }
+.robot-face .rg-spin-rev { transform-box: fill-box; transform-origin: center; animation: rgRotate 40s linear infinite reverse; }
+@keyframes rgRotate { to { transform: rotate(360deg); } }
+.robot-face .rg-blade { fill: url(#rg-iris); stroke: rgba(57,255,20,.55); stroke-width: 0.6; }
+.robot-face .rg-iris { transform-box: fill-box; transform-origin: center; animation: apertureBlink 4.6s ease-in-out infinite; }
+@keyframes apertureBlink { 0%, 90%, 100% { transform: scale(1); } 94% { transform: scale(.86); } }
+.robot-face .rg-pupil { fill: #02100a; stroke: #39ff14; stroke-width: 1.6; }
+.robot-face .rg-pupil-core { fill: #020a03; }
+.robot-face .rg-vertex { fill: url(#rg-gold); }
+.robot-face .rg-antenna-line { stroke: #fbbf24; stroke-width: 2; }
+.robot-face .rg-antenna { fill: #39ff14; animation: blink 1.6s infinite; }
+.robot-face.power .rg-iris { animation: apertureSpin 1s linear infinite; }
+@keyframes apertureSpin { to { transform: rotate(360deg); } }
+.robot-face.power .rg-aura { opacity: 1; }
+.robot-face.off .rg-iris, .robot-face.off .rg-hex1 { opacity: .12; }
+.robot-face.off .rg-aura { opacity: 0; }
+.robot-face.off .rg-antenna { opacity: .15; }
 
 /* ── Boot screen ── */
 .boot {
@@ -212,8 +229,10 @@ body::after {
 .eye-outer { position: absolute; inset: 0; border-radius: 50%; overflow: hidden; border: 2px solid rgba(57,255,20,.55); box-shadow: 0 0 60px rgba(57,255,20,.3), inset 0 0 40px rgba(57,255,20,.1); }
 .eye-segments { position: absolute; inset: -10px; border-radius: 50%; border: 1px dashed rgba(57,255,20,.35); animation: spin 40s linear infinite; }
 .eye-sclera { position: absolute; inset: 8px; border-radius: 50%; background: radial-gradient(circle at 50% 50%, #07130a 0%, #030705 70%); }
-.eye-iris { position: absolute; inset: 34px; border-radius: 50%; background: radial-gradient(circle at 50% 50%, #d8ffd0 0%, #39ff14 30%, #0f7a1f 62%, #03270a 100%); transform: translate(calc(var(--px) * 22px), calc(var(--py) * 22px)); transition: transform .15s ease-out; box-shadow: inset 0 0 30px rgba(0,0,0,.6), 0 0 30px rgba(57,255,20,.5); }
-.eye-pupil { position: absolute; inset: 34%; border-radius: 50%; background: #020a03; box-shadow: 0 0 20px rgba(0,0,0,.9); }
+.eye-hex { position: absolute; inset: 4%; width: 92%; height: 92%; opacity: .35; animation: spin 36s linear infinite; pointer-events: none; }
+.eye-hex polygon { fill: none; stroke: rgba(57,255,20,.4); stroke-width: 1.5; stroke-dasharray: 7 5; }
+.eye-iris { position: absolute; inset: 34px; clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); background: radial-gradient(circle at 50% 45%, #d8ffd0 0%, #39ff14 30%, #0f7a1f 62%, #03270a 100%); transform: translate(calc(var(--px) * 22px), calc(var(--py) * 22px)); transition: transform .15s ease-out; filter: drop-shadow(0 0 14px rgba(57,255,20,.5)); }
+.eye-pupil { position: absolute; inset: 36% 30%; clip-path: polygon(12% 38%, 88% 38%, 100% 50%, 88% 62%, 12% 62%, 0% 50%); background: #020a03; box-shadow: 0 0 16px rgba(0,0,0,.9); }
 .eye-ring-1 { position: absolute; inset: 0; border-radius: 50%; border: 1px solid rgba(0,0,0,.35); }
 .eye-ring-2 { position: absolute; inset: 22%; border-radius: 50%; border: 1px solid rgba(57,255,20,.35); }
 .eye-lid { position: absolute; top: -14%; left: -7%; right: -7%; bottom: -14%; background: linear-gradient(to bottom, #030705, #010401); transform: translateY(-112%); transition: transform .9s cubic-bezier(.65,0,.25,1); z-index: 5; }

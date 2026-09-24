@@ -44,6 +44,9 @@ export default function Eye({ scanning, done, grade, open = true }) {
       <div className="eye-outer">
         <div className="eye-segments" />
         <div className="eye-sclera" />
+        <svg className="eye-hex" viewBox="0 0 100 100" aria-hidden>
+          <polygon points="3,50 26.5,9 73.5,9 97,50 73.5,91 26.5,91" />
+        </svg>
         <div className="eye-iris">
           <div className="eye-pupil" />
           <div className="eye-ring-1" />
