@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import Globe from './components/Globe.jsx'
 import AttackGraph from './components/AttackGraph.jsx'
 import Eye from './components/Eye.jsx'
 import Logo from './components/Logo.jsx'
@@ -54,10 +53,16 @@ export default function App() {
   const [history, setHistory] = useState([])
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('sentinel_api_key') || '')
   const [booted, setBooted] = useState(false)
+  const [bootGone, setBootGone] = useState(false)
   const termRef = useRef(null)
 
+  function finishBoot() {
+    setBooted(true)
+    setTimeout(() => setBootGone(true), 550)
+  }
+
   useEffect(() => { loadHistory() }, [])
-  useEffect(() => { const t = setTimeout(() => setBooted(true), 2200); return () => clearTimeout(t) }, [])
+  useEffect(() => { const t = setTimeout(finishBoot, 2100); return () => clearTimeout(t) }, [])
   useEffect(() => {
     if (termRef.current) termRef.current.scrollTop = termRef.current.scrollHeight
   }, [logs])
@@ -162,8 +167,8 @@ export default function App() {
     <div className="app">
       <SynthGrid />
 
-      {!booted && (
-        <div className="boot" onClick={() => setBooted(true)}>
+      {!bootGone && (
+        <div className={'boot' + (booted ? ' hide' : '')} onClick={finishBoot}>
           <div className="boot-text">AEGIS SYSTEM // INITIALIZING</div>
           <div className="boot-bar"><i /></div>
         </div>
@@ -192,7 +197,10 @@ export default function App() {
 
       {/* ── Hero ── */}
       <section className="hero" id="scan">
-        <Globe />
+        <div className="eyes-row">
+          <Eye open={booted} scanning={scanning} done={!!findings} grade={grade} />
+          <Eye open={booted} scanning={scanning} done={!!findings} grade={grade} />
+        </div>
         <div className="hero-copy">
           <span className="eyebrow"><span className="dot" /> AEGIS SYSTEM // ONLINE</span>
           <h1>Find what your API <span className="accent">leaks.</span></h1>
@@ -236,9 +244,6 @@ export default function App() {
 
             {error && <div className="error">{error}</div>}
           </div>
-        </div>
-        <div className="eye-hero">
-          <Eye scanning={scanning} done={!!findings} grade={grade} />
         </div>
       </section>
 

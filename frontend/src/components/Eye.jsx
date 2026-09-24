@@ -1,9 +1,20 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-// Robotic overseer eye — blinks, tracks the cursor, sweeps while scanning,
-// and glows green/red when the analysis completes.
-export default function Eye({ scanning, done, grade }) {
+// Robotic eye — closed during boot (glowing lid), then opens; blinks
+// periodically, tracks the cursor, sweeps while scanning, and turns
+// green (ACCESS GRANTED) or red (THREAT) on completion.
+export default function Eye({ scanning, done, grade, open = true }) {
   const ref = useRef(null)
+  const [blink, setBlink] = useState(false)
+
+  // periodic blink
+  useEffect(() => {
+    const t = setInterval(() => {
+      setBlink(true)
+      setTimeout(() => setBlink(false), 150)
+    }, 4200)
+    return () => clearInterval(t)
+  }, [])
 
   // Iris tracks the cursor
   useEffect(() => {
@@ -22,9 +33,11 @@ export default function Eye({ scanning, done, grade }) {
 
   const cls = [
     'eye',
+    !open ? 'closed' : '',
+    blink ? 'blink' : '',
     scanning ? 'scanning' : '',
     done ? (grade && grade.grade === 'A' ? 'approved' : 'threat') : ''
-  ].join(' ')
+  ].filter(Boolean).join(' ')
 
   return (
     <div className={cls} ref={ref} aria-label="scanning eye">
