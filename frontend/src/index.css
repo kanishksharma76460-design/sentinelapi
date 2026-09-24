@@ -418,7 +418,8 @@ body::after {
   .hero { gap: 18px; }
   .eyes-row { gap: 16px; }
   .eye { width: 150px; height: 150px; }
-  .nav-links { display: none; }
+  .nav { flex-wrap: wrap; }
+  .nav-links { display: flex; flex-wrap: wrap; margin-left: auto; gap: 4px; }
   .scan-row { flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) {

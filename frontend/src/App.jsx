@@ -17,7 +17,7 @@ const STAGES = ['TARGETING', 'PROBING', 'EXPLOITING', 'GRADING']
 const BOOT_LINES = [
   '> CALIBRATING OPTIC SENSOR ............ OK',
   '> LOADING SCAN ENGINE v2.4 ............ OK',
-  '> ARMING 8 VULNERABILITY CLASSES ...... OK',
+  '> ARMING 14 VULNERABILITY CLASSES ..... OK',
   '> SPOOLING PROOF-OF-EXPLOIT ENGINE .... OK',
   '> ESTABLISHING ZERO-TRUST SHELL ....... OK',
   '> AEGIS SYSTEM // ONLINE',
@@ -380,7 +380,7 @@ export default function App() {
           <h1>Find what your API <span className="accent">leaks.</span></h1>
           <p>
             Athera Secure scans any API for broken access control, leaked data and
-            weak authentication — eight vulnerability classes, graded A–F, with
+            weak authentication — fourteen vulnerability classes, graded A–F, with
             proof you can run yourself.
           </p>
 
