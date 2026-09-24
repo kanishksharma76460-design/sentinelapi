@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Globe from './components/Globe.jsx'
 import AttackGraph from './components/AttackGraph.jsx'
 import Eye from './components/Eye.jsx'
+import Logo from './components/Logo.jsx'
 import {
   ALL_CHECKS, DEMO_TARGET, OWASP, SEV,
   startScan, getScan, listScans, cancelScan, deleteScan, reportUrl
@@ -168,7 +169,7 @@ export default function App() {
       {/* ── Nav ── */}
       <nav className="nav">
         <div className="logo">
-          <span className="mark">🛡</span>
+          <span className="mark"><Logo size={30} /></span>
           <span>Athera <span className="dim">Secure</span></span>
         </div>
         <div className="nav-links">
