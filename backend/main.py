@@ -48,10 +48,12 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = Path(__file__).resolve().parent / "static"
+DIST = ROOT / "frontend" / "dist"
 ENGINE_BIN = ROOT / "engine" / "sentinel-engine"
 DB_PATH = Path(os.environ.get("DB_PATH", str(ROOT / "scans.db")))
 
@@ -98,6 +100,17 @@ _lock = threading.Lock()
 _executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
 _jobs: dict[str, subprocess.Popen] = {}          # job_id -> running engine proc
 _job_lock = threading.Lock()
+
+# Live scan logs, streamed to the dashboard's attack terminal.
+_job_logs: dict[str, list[str]] = {}
+
+
+def append_log(job_id: str, line: str) -> None:
+    with _lock:
+        lines = _job_logs.setdefault(job_id, [])
+        lines.append(line)
+        if len(lines) > 500:
+            del lines[:-500]
 
 
 def _db_update(sql: str, params: tuple) -> None:
@@ -229,21 +242,32 @@ def execute_engine(target: str, checks: list[str] | None,
 
         proc = subprocess.Popen(cmd, cwd=ROOT,
                                 stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+                                stderr=subprocess.STDOUT, text=True)
         with _job_lock:
             _jobs[job_id] = proc
+
+        def _pump_logs():
+            # Stream each engine line into the job's live log buffer.
+            for line in proc.stdout:
+                line = line.rstrip("\n").rstrip("\r")
+                if line.strip():
+                    append_log(job_id, line)
+
+        reader = threading.Thread(target=_pump_logs, daemon=True)
+        reader.start()
         try:
-            stdout, stderr = proc.communicate(timeout=SCAN_TIMEOUT)
+            proc.wait(timeout=SCAN_TIMEOUT)
         except subprocess.TimeoutExpired:
             proc.kill()
-            proc.communicate()
+            proc.wait()
             raise RuntimeError(f"scan exceeded {SCAN_TIMEOUT}s timeout")
         finally:
             with _job_lock:
                 _jobs.pop(job_id, None)
+        reader.join(timeout=2)
 
         if proc.returncode != 0:
-            detail = (stderr or stdout).decode(errors="replace").strip()
+            detail = "\n".join(_job_logs.get(job_id, [])[-5:])
             raise RuntimeError(detail or f"engine exited {proc.returncode}")
 
         with open(out_json) as fh:
@@ -265,8 +289,12 @@ def notify_webhook(webhook_url: str, payload: dict) -> None:
 def run_scan(job_id: str, target: str, checks: list[str] | None,
              webhook_url: str | None) -> None:
     set_status(job_id, "running")
+    append_log(job_id, "[*] sentinel engine armed")
+    append_log(job_id, f"[*] target acquired: {target}")
+    append_log(job_id, "[*] active checks: " + (",".join(checks) if checks else "all"))
     try:
         findings = execute_engine(target, checks, job_id)
+        append_log(job_id, f"[+] mission complete: {len(findings)} finding(s)")
         set_status(job_id, "done", findings=findings)
         log.info("scan %s done: %d finding(s)", job_id[:8], len(findings))
         if webhook_url:
@@ -275,6 +303,7 @@ def run_scan(job_id: str, target: str, checks: list[str] | None,
                 "findings": findings,
             })
     except Exception as exc:  # noqa: BLE001 — surface to the client
+        append_log(job_id, f"[!] scan fault: {exc}")
         set_status(job_id, "error", error=str(exc))
         log.warning("scan %s failed: %s", job_id[:8], exc)
         if webhook_url:
@@ -285,11 +314,6 @@ def run_scan(job_id: str, target: str, checks: list[str] | None,
 
 
 # ---- routes ----------------------------------------------------------------
-@app.get("/")
-def index():
-    return FileResponse(str(STATIC / "index.html"))
-
-
 @app.get("/api/health")
 def health():
     return {
@@ -340,6 +364,7 @@ def scan_status(job_id: str, request: Request):
         "status": status,
         "findings": fs,
         "grade": grade_of(fs),
+        "logs": list(_job_logs.get(job_id, [])),
         "error": error,
     }
 
@@ -372,6 +397,7 @@ def delete_scan(job_id: str, request: Request):
     with _lock:
         cur = _conn.execute("DELETE FROM scans WHERE id=?", (job_id,))
         _conn.commit()
+    _job_logs.pop(job_id, None)
     if cur.rowcount == 0:
         raise HTTPException(404, "scan not found")
     return {"job_id": job_id, "deleted": True}
@@ -609,3 +635,10 @@ def scan_report_pdf(job_id: str, request: Request):
 @app.on_event("shutdown")
 def shutdown():
     _executor.shutdown(wait=False, cancel_futures=True)
+
+
+# ---- static frontend (mounted last so /api/* routes win) -------------------
+if DIST.exists():
+    app.mount("/", StaticFiles(directory=str(DIST), html=True), name="frontend")
+else:
+    app.mount("/", StaticFiles(directory=str(STATIC), html=True), name="static")

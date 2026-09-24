@@ -27,5 +27,9 @@ scanner/report.html
 final/
 research/
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
 # OS / editor
 .DS_Store

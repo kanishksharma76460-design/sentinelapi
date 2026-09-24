@@ -308,6 +308,51 @@
   .attack-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
   .attack-legend .hub-key i { border-radius: 3px; }
 
+  /* ── Live attack terminal ── */
+  .terminal-panel { padding: 0; overflow: hidden; background: #050b12 !important; border-color: rgba(0,210,255,0.3); }
+  .term-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: rgba(0,0,0,0.55); border-bottom: 1px solid rgba(0,210,255,0.2); }
+  .term-dots { display: flex; gap: 6px; }
+  .term-dots i { width: 10px; height: 10px; border-radius: 50%; }
+  .term-dots i:nth-child(1) { background: #ff5f57; }
+  .term-dots i:nth-child(2) { background: #febc2e; }
+  .term-dots i:nth-child(3) { background: #28c840; }
+  .term-title { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #94a3b8; letter-spacing: .08em; }
+  .term-stage { margin-left: auto; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 900; letter-spacing: .18em; color: #00ff9c; text-shadow: 0 0 10px rgba(0,255,156,.7); animation: blink 1.2s infinite; }
+  .term-body {
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.8;
+    color: #00ff9c; padding: 14px 18px; height: 250px; overflow-y: auto;
+    text-shadow: 0 0 6px rgba(0,255,156,.35);
+    background: repeating-linear-gradient(0deg, rgba(0,255,156,0.03) 0 1px, transparent 1px 3px);
+  }
+  .term-body .ln { white-space: pre-wrap; word-break: break-all; }
+  .term-body .ln.ok { color: #00ff9c; }
+  .term-body .ln.err { color: #ff5f57; text-shadow: 0 0 6px rgba(255,95,87,.5); }
+
+  /* ── Cyberpunk skin: scanlines + glitch ── */
+  .scanlines {
+    position: fixed; inset: 0; z-index: 60; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.07) 0 1px, transparent 1px 3px);
+    mix-blend-mode: multiply;
+  }
+  @keyframes glitchShift {
+    0%, 100% { text-shadow: 0 0 20px rgba(255,255,255,.5); transform: none; }
+    20% { text-shadow: -2px 0 #ff003c, 2px 0 #00d2ff; transform: translateX(-1px); }
+    40% { text-shadow: 2px 0 #00d2ff, -2px 0 #ff003c; transform: translateX(1px); }
+    60% { text-shadow: 0 0 20px rgba(255,255,255,.5); transform: none; }
+  }
+  .sidebar .logo { animation: glitchShift 6s infinite; }
+
+  /* ── Attack graph: 3D tumble + node pulse ── */
+  #attackSvg { transform-style: preserve-3d; animation: tumble3d 16s ease-in-out infinite; }
+  @keyframes tumble3d {
+    0%, 100% { transform: perspective(900px) rotateX(9deg) rotateY(0deg); }
+    50% { transform: perspective(900px) rotateX(-7deg) rotateY(7deg); }
+  }
+  #attackSvg circle { animation: nodePulse 2.4s ease-in-out infinite; }
+  @keyframes nodePulse { 0%, 100% { opacity: .95; } 50% { opacity: .6; } }
+  #attackSvg line { animation: edgePulse 2.4s ease-in-out infinite; }
+  @keyframes edgePulse { 0%, 100% { stroke-opacity: .35; } 50% { stroke-opacity: .7; } }
+
   /* ── Hero typography ── */
   .hero-head { text-align: center; }
   .hero-title {
@@ -406,6 +451,7 @@
 
 <!-- Canvas fills the full viewport behind everything -->
 <canvas id="globe-canvas"></canvas>
+<div class="scanlines"></div>
 
   <div class="dashboard-layout">
   <aside class="sidebar">
@@ -523,6 +569,15 @@
         </table>
       </section>
     </div>
+
+    <section class="panel terminal-panel" id="termPanel" style="display:none;margin-top:24px;">
+      <div class="term-head">
+        <span class="term-dots"><i></i><i></i><i></i></span>
+        <span class="term-title">sentinel://live-recon</span>
+        <span class="term-stage" id="termStage">TARGETING</span>
+      </div>
+      <div class="term-body" id="termBody"></div>
+    </section>
 
     <section class="panel attack-panel" id="attackPanel" style="display:none;margin-top:24px;">
       <div class="sum-title">🗺 ATTACK SURFACE MAP <span>•••</span></div>
@@ -1374,6 +1429,8 @@ async function startScan() {
   if (!target)  { showErr('SYS.ERR: TARGET_URL_REQUIRED');  return; }
   if (!consent) { showErr('SYS.ERR: AUTHORIZATION_MISSING'); return; }
 
+  showTerminal();
+
   const btn = $('scanBtn');
   btn.disabled = true; btn.classList.add('loading');
   showStatus('Establishing Global Trust Connection…');
@@ -1410,6 +1467,7 @@ async function startScan() {
     const data = await r.json();
     clearInterval(sInterval);
     if (!r.ok) {
+      hideTerminal();
       hide($('status')); btn.disabled = false; btn.classList.remove('loading');
       showErr('SYS.ERR: ' + (data.detail || ('HTTP ' + r.status)));
       return;
@@ -1445,20 +1503,72 @@ async function startScan() {
 async function poll(jobId) {
   const btn = $('scanBtn');
   for (;;) {
-    await new Promise(r => setTimeout(r, 1100));
+    await new Promise(r => setTimeout(r, 700));
     let data;
     try { data = await (await fetch('/api/scan/' + jobId, { headers: apiHeaders() })).json(); } catch { continue; }
+    if (data.logs && data.logs.length) renderTermLogs(data.logs);
     if (data.status === 'queued' || data.status === 'running') {
-      showStatus('Scanning: ' + data.target); continue;
+      updateStage(data);
+      continue;
     }
     if (data.status === 'error') {
+      termWrite('[!] scan fault', 'err');
       hide($('status')); btn.disabled = false; btn.classList.remove('loading');
       showErr('SYS.ERR: ' + (data.error || 'UNKNOWN_FAULT')); return;
     }
+    setStage(3);
+    const g = data.grade ? (data.grade.grade + ' · ' + data.grade.score + '/100') : 'n/a';
+    termWrite('>> security grade: ' + g, 'ok');
     hide($('status')); btn.disabled = false; btn.classList.remove('loading');
     render(data.findings, data.target);
     return;
   }
+}
+
+/* ── Live attack terminal ── */
+const TERM_STAGES = ['TARGETING', 'PROBING', 'EXPLOITING', 'GRADING'];
+let _termLines = 0;
+
+function showTerminal() {
+  const p = $('termPanel'); if (!p) return;
+  p.style.display = 'block';
+  $('termBody').innerHTML = '';
+  _termLines = 0;
+  setStage(0);
+  termWrite('>> initializing sentinel engine v1.0.0', 'ok');
+  termWrite('>> establishing zero-trust channel…', '');
+}
+
+function hideTerminal() { const p = $('termPanel'); if (p) p.style.display = 'none'; }
+
+function termWrite(text, cls) {
+  const b = $('termBody'); if (!b) return;
+  const div = document.createElement('div');
+  div.className = 'ln ' + (cls || '');
+  div.textContent = text;
+  b.appendChild(div);
+  b.scrollTop = b.scrollHeight;
+}
+
+function renderTermLogs(logs) {
+  for (let i = _termLines; i < logs.length; i++) {
+    const l = logs[i];
+    const cls = l.startsWith('[!]') ? 'err' : (l.startsWith('[+]') || l.startsWith('>>') ? 'ok' : '');
+    termWrite(l, cls);
+  }
+  _termLines = logs.length;
+}
+
+function setStage(idx) {
+  const el = $('termStage'); if (!el) return;
+  el.textContent = TERM_STAGES[idx] || 'GRADING';
+}
+
+function updateStage(data) {
+  const txt = (data.logs || []).join(' ');
+  if (txt.includes('finding(s):') || (data.findings && data.findings.length)) setStage(2);
+  else if (txt.includes('registered')) setStage(1);
+  else setStage(0);
 }
 
 function render(findings, target) {

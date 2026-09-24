@@ -4,7 +4,15 @@ WORKDIR /src
 COPY engine/ ./
 RUN CGO_ENABLED=0 go build -o sentinel-engine .
 
-# ---- stage 2: Python backend + static UI ----
+# ---- stage 2: build the React frontend ----
+FROM node:20-alpine AS frontend
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build
+
+# ---- stage 3: Python backend + static UI ----
 FROM python:3.13-slim
 WORKDIR /app
 
@@ -13,6 +21,7 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend/ /app/backend/
 COPY --from=engine /src/sentinel-engine /app/engine/sentinel-engine
+COPY --from=frontend /app/dist /app/frontend/dist
 
 ENV PORT=8000
 EXPOSE 8000
