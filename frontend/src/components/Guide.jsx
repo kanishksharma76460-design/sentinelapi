@@ -68,6 +68,10 @@ export default function Guide({ onClose }) {
               ))}
             </div>
           </section>
+
+          <div className="guide-download">
+            <a href="/preprint" target="_blank" rel="noreferrer">↓ Download the research preprint (PDF)</a>
+          </div>
         </div>
       </div>
     </div>

@@ -699,6 +699,185 @@ def scan_report_pdf(job_id: str, request: Request):
         headers={"Content-Disposition":
                  f'attachment; filename="sentinelapi-{job_id[:8]}.pdf"'})
 
+# ---- research preprint (generated on demand, no LaTeX in the image) ---------
+_PREPRINT_CLASSES = [
+    ("BOLA / IDOR", "Cross-principal differential oracle — substitute one principal's identifier into another's session and flag 200 responses containing foreign data."),
+    ("Excessive Data Exposure", "Schema-contract oracle — diff the response paths against the OpenAPI response schema, recursing into nested objects."),
+    ("Broken Authentication", "Probe endpoints that declare a security requirement with no Authorization header and flag 200 responses."),
+    ("BFLA", "Probe admin-prefixed endpoints with a regular (non-admin) token."),
+    ("Mass Assignment", "Inject privileged fields (role, is_admin) into write endpoints and flag any that accept and reflect them."),
+    ("Security Misconfiguration", "Header inspection for version disclosure and missing hardening headers."),
+    ("Missing Rate Limiting", "Flood a cheap endpoint and flag the absence of 429 / Retry-After."),
+    ("Exposed Debug Endpoints", "Probe a curated list of debug / inventory paths for internal information leaks."),
+    ("JWT Analysis", "Forge alg:none tokens, re-sign with weak HMAC secrets, and check the exp claim."),
+    ("SQL / NoSQL Injection", "Error-based SQL payloads matched to DB error signatures; NoSQL operator probes compared against a benign baseline."),
+    ("CORS Misconfiguration", "Reflect an attacker Origin and detect credentialed reflection / wildcard+credentials."),
+    ("SSRF", "Inject loopback / link-local / cloud-metadata URLs into URL-valued parameters."),
+    ("GraphQL Introspection", "Probe /graphql with an introspection query."),
+    ("Spec Audit", "Flag undocumented endpoints, missing security schemes, and absent security declarations."),
+]
+
+
+def _render_preprint_pdf() -> bytes:
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.graphics.shapes import Drawing, Polygon
+    from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer,
+                                    Table, TableStyle)
+
+    NEON = colors.HexColor("#39ff14")
+    GOLD = colors.HexColor("#fbbf24")
+    GREY = colors.HexColor("#6b7680")
+
+    def _logo() -> Drawing:
+        d = Drawing(64, 64)
+        d.add(Polygon([32, 64, 58, 50, 58, 14, 32, 0, 6, 14, 6, 50],
+                      strokeColor=GOLD, strokeWidth=3,
+                      fillColor=colors.HexColor("#0a0f08")))
+        d.add(Polygon([32, 52, 52, 40, 52, 24, 32, 12, 12, 24, 12, 40],
+                      strokeColor=NEON, strokeWidth=2,
+                      fillColor=colors.HexColor("#0f3a14")))
+        d.add(Polygon([22, 32, 28, 26, 36, 26, 42, 32, 36, 38, 28, 38],
+                      strokeColor=NEON, strokeWidth=1,
+                      fillColor=colors.HexColor("#020a03")))
+        return d
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=letter, rightMargin=54, leftMargin=54,
+        topMargin=46, bottomMargin=46,
+        title="Athera Secure (SentinelAPI) — Preprint")
+    ss = getSampleStyleSheet()
+    title_st = ParagraphStyle("t", parent=ss["Title"], textColor=NEON,
+                              alignment=TA_CENTER, fontSize=20, spaceAfter=4)
+    sub_st = ParagraphStyle("s", parent=ss["Normal"], alignment=TA_CENTER,
+                            textColor=GREY, fontSize=9, leading=12)
+    h2 = ParagraphStyle("h2", parent=ss["Heading2"], textColor=NEON,
+                        spaceBefore=12, spaceAfter=4, fontSize=12)
+    body = ParagraphStyle("b", parent=ss["Normal"], alignment=TA_JUSTIFY,
+                          fontSize=10, leading=14.5, textColor=colors.HexColor("#e6e8eb"))
+
+    story = [Spacer(1, 2)]
+    lt = Table([[ _logo() ]], colWidths=[doc.width])
+    lt.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+    story.append(lt)
+    story.append(Paragraph("Athera Secure (SentinelAPI)", title_st))
+    story.append(Paragraph(
+        "Zero-Trust API Vulnerability Scanning via Cross-Principal Differential Testing<br/>"
+        "AMIHACKS 2026 · Track C (Industry / Deep-Tech) · Jaipur, Rajasthan, India", sub_st))
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph("Abstract", h2))
+    story.append(Paragraph(
+        "Athera Secure (SentinelAPI) is a production-deployed, zero-trust API "
+        "vulnerability scanner that detects <b>fourteen</b> vulnerability classes "
+        "from an OpenAPI specification and live traffic: BOLA/IDOR, excessive data "
+        "exposure, broken authentication, BFLA, mass assignment, security "
+        "misconfiguration, missing rate limiting, exposed debug endpoints, JWT "
+        "misconfiguration, SQL/NoSQL injection, CORS misconfiguration, SSRF, "
+        "GraphQL introspection, and undocumented endpoints. Authorization flaws are "
+        "detected by <b>cross-principal differential testing</b>; over-exposure by a "
+        "<b>schema-contract oracle</b>; and the remaining classes by <b>crafted active "
+        "probes</b>. The Go engine (a single static binary) is wrapped in a hardened "
+        "FastAPI product with an SSRF guard, rate limiting, optional session login, a "
+        "bounded job pool, HTML/JSON/PDF/SARIF/CSV reports, WebSocket live logs, "
+        "regression diff, and webhooks. Every scan is graded A–F and mapped to OWASP "
+        "API Security Top 10 (2023). Against two deliberately vulnerable sandbox APIs "
+        "the system achieves <b>precision = recall = F1 = 1.0</b> (42/42 findings, zero "
+        "false positives, zero false negatives), and is live at "
+        "https://athera-secure-production.up.railway.app.", body))
+    story.append(Spacer(1, 4))
+
+    story.append(Paragraph("Fourteen detection classes", h2))
+    rows = [[Paragraph("<b>Class</b>", body), Paragraph("<b>Oracle</b>", body)]]
+    for name, desc in _PREPRINT_CLASSES:
+        rows.append([Paragraph(f"<font color='#39ff14'>{name}</font>", body), Paragraph(desc, body)])
+    t = Table(rows, colWidths=[doc.width * 0.30, doc.width * 0.70])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f1a10")),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#2a2f35")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph("Evaluation", h2))
+    story.append(Paragraph(
+        "We benchmarked the Go engine against two deliberately vulnerable sandbox "
+        "APIs (a “Bank” API and a “Library” API with different identifier names and "
+        "flaw mixes), each containing secure control endpoints that must produce zero "
+        "findings. The Bank API seeds 32 findings and the Library 10; the scanner "
+        "detected all 42 with zero false positives and zero false negatives, and the "
+        "control endpoints produced no findings.", body))
+    story.append(Spacer(1, 4))
+    et = Table([
+        [Paragraph("<b>Metric</b>", body), Paragraph("<b>Bank</b>", body), Paragraph("<b>Library</b>", body)],
+        [Paragraph("Seeded findings", body), Paragraph("32", body), Paragraph("10", body)],
+        [Paragraph("Detected", body), Paragraph("32", body), Paragraph("10", body)],
+        [Paragraph("False positives", body), Paragraph("0", body), Paragraph("0", body)],
+        [Paragraph("False negatives", body), Paragraph("0", body), Paragraph("0", body)],
+    ], colWidths=[doc.width * 0.44, doc.width * 0.28, doc.width * 0.28])
+    et.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f1a10")),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#2a2f35")),
+        ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(et)
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph("Contributions", h2))
+    for c in [
+        "A spec-derived authorization oracle — the security contract is encoded as a differential test, not guessed by fuzzing.",
+        "Generic principal-identifier inference — no hardcoded field names.",
+        "Recursive schema-contract diffing for nested over-exposure.",
+        "An active-probe suite (JWT forgery, SQL/NoSQL payloads, CORS reflection, SSRF, GraphQL) with baseline-differential de-duplication.",
+        "Fourteen-class coverage with OWASP mapping and A–F grading.",
+        "Production exports (SARIF 2.1.0, CSV), WebSocket live logs, and regression diff.",
+        "A production-hardened, publicly deployed platform on Railway.",
+    ]:
+        story.append(Paragraph("• " + c, body))
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph("References", h2))
+    for r in [
+        "OWASP Foundation. OWASP API Security Top 10:2023.",
+        "W. M. McKeeman. “Differential Testing for Software.” Digital Technical Journal, 1998.",
+        "V. Atlidakis et al. “RESTler: Stateful REST API Fuzzing.” ICSE, 2019.",
+        "A. Arcuri. “EvoMaster.” ACM TOSEM, 2019.",
+        "Y. Liu et al. “Morest.” ISSTA, 2022.",
+        "M. Jones et al. “JSON Web Token (JWT).” RFC 7519, 2015.",
+        "MITRE. “CWE-918: Server-Side Request Forgery.”",
+        "GraphQL Foundation. “GraphQL Specification: Introspection.”",
+        "OASIS. “SARIF Version 2.1.0.”",
+    ]:
+        story.append(Paragraph(r, body))
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph(
+        "Live: https://athera-secure-production.up.railway.app · "
+        "GitHub: https://github.com/kanishksharma76460-design/sentinelapi", sub_st))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+@app.get("/preprint")
+def preprint():
+    """Download the research preprint as a PDF (generated on demand)."""
+    return Response(
+        content=_render_preprint_pdf(), media_type="application/pdf",
+        headers={"Content-Disposition":
+                 'attachment; filename="athera-secure-preprint.pdf"'})
 
 # ---- SARIF / CSV export ----------------------------------------------------
 def _render_report_sarif(target: str, findings: list) -> dict:

@@ -400,6 +400,9 @@ body::after {
 .guide-check { border: 1px solid var(--line); background: rgba(57,255,20,.03); padding: 10px 12px; }
 .guide-check b { display: block; font-family: var(--mono); font-size: 12px; color: var(--cyan); letter-spacing: .04em; margin-bottom: 4px; }
 .guide-check span { font-family: var(--mono); font-size: 11px; color: var(--dim); line-height: 1.5; }
+.guide-download { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); text-align: center; }
+.guide-download a { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--cyan); text-decoration: none; }
+.guide-download a:hover { text-shadow: 0 0 12px rgba(57,255,20,.6); }
 
 /* Regression diff banner */
 .diff-banner { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 16px; padding: 12px 16px; border: 1px solid var(--line); background: var(--panel); font-family: var(--mono); font-size: 12px; }

@@ -105,6 +105,18 @@ export default function App() {
     setGateClosing(false)
   }
 
+  function resetToGate() {
+    setTerminated(false)
+    setGateOpen(false)
+    setGateClosing(false)
+    setBooted(false)
+    setBootGone(false)
+    setBootLine(0)
+    setFindings(null)
+    setGrade(null)
+    setLogs([])
+  }
+
   useEffect(() => { loadHistory() }, [])
   useEffect(() => {
     getHealth().then(setHealth).catch(() => setHealth({ engine: false }))
@@ -331,7 +343,7 @@ export default function App() {
 
       {/* ── Nav ── */}
       <nav className="nav">
-        <div className="logo">
+        <div className="logo" onClick={resetToGate} title="Back to access gate" style={{ cursor: 'pointer' }}>
           <span className="mark"><Logo size={30} /></span>
           <span>Athera <span className="dim">Secure</span></span>
         </div>
@@ -340,6 +352,7 @@ export default function App() {
           <a href="#results">Results</a>
           <a href="#history">History</a>
           <button onClick={() => setGuideOpen(true)}>Guide</button>
+          <a href="/preprint" target="_blank" rel="noreferrer">Preprint</a>
           {sessionOn && <button onClick={doLogout}>Logout</button>}
           <input
             type="password"
